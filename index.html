@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="베이스 타브">
+<meta name="theme-color" content="#e6e9ed">
+<title>베이스 타브 노트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Nanum+Pen+Script&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 레이아웃: 왼쪽 작업대(불러오기·넥 맞추기·설정·Gemini), 오른쪽 연필로 쓴 타브 종이. 좁으면 위아래로 쌓임 */
+:root {
+  --bg: #e6e9ed; --panel: #fbfcfd; --ink: #1b2129; --muted: #5a6573; --line: #ccd3db;
+  --accent: #2547b0; --accent-ink: #ffffff; --warn: #9a5b00; --ok: #1f7a4a; --bad: #b42318; --chip: #eef1f5;
+  --shadow: 0 1px 2px rgba(20,30,45,.08), 0 8px 24px rgba(20,30,45,.08);
+  --paper: #fafbfd;
+  --font-hand: "Nanum Pen Script", "Caveat", cursive;
+  --font-body: "IBM Plex Sans KR", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #12161b; --panel: #1b2129; --ink: #e5e9ee; --muted: #9aa6b3; --line: #2d3641;
+  --accent: #8ea8ff; --accent-ink: #0d1530; --warn: #e3a64a; --ok: #5cc48d; --bad: #ff8a80; --chip: #242c36;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35); color-scheme: dark; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: max(14px, env(safe-area-inset-top, 0px)); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); -webkit-text-size-adjust: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+header.top { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; max-width: 1500px; margin: 0 auto 12px; }
+header.top h1 { font-family: var(--font-hand); font-weight: 400; font-size: 2.6rem; line-height: 1; margin: 0; }
+header.top p { margin: 0; color: var(--muted); font-size: .9rem; }
+.layout { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 18px; max-width: 1500px; margin: 0 auto; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.bench { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card h2 { margin: 0; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card h2 .step { font-family: var(--font-mono); color: var(--accent); }
+.hint { margin: 0; color: var(--muted); font-size: .85rem; }
+.hint b { color: var(--ink); font-weight: 600; }
+.drop { border: 1.5px dashed var(--line); border-radius: 10px; padding: 14px; text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center; cursor: pointer; }
+.drop.over { border-color: var(--accent); }
+.filename { font-family: var(--font-mono); font-size: .82rem; word-break: break-all; }
+.btn { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--chip); font-weight: 500; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.small { min-height: 38px; padding: 0 12px; font-size: .88rem; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > .btn { flex: 1 1 auto; }
+.field { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.field label { font-size: .88rem; }
+.field output { font-family: var(--font-mono); font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.field input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); height: 28px; }
+.field select, .field input[type=number], .field input[type=text], .field input[type=password], .field input[type=url] { min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); padding: 0 8px; max-width: 190px; min-width: 0; }
+.field input[type=number] { width: 96px; }
+.field.wide { grid-template-columns: 1fr; }
+.field.wide input, .field.wide select { max-width: none; width: 100%; }
+.toggle { display: flex; align-items: center; gap: 10px; font-size: .88rem; min-height: 36px; }
+.toggle input { width: 20px; height: 20px; accent-color: var(--accent); }
+details.adv summary { cursor: pointer; font-size: .88rem; color: var(--muted); min-height: 32px; display: flex; align-items: center; }
+details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+
+.videobox { position: relative; border-radius: 10px; overflow: hidden; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+.videobox video { display: block; width: 100%; height: auto; }
+.videobox canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.scrub { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.scrub input { width: 100%; accent-color: var(--accent); }
+.mono { font-family: var(--font-mono); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.keys { display: flex; flex-wrap: wrap; gap: 6px; }
+.keys button { min-height: 32px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); padding: 0 10px; font-family: var(--font-mono); font-size: .8rem; }
+.keys button.cur { border-color: var(--accent); color: var(--accent); }
+
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.stages { display: flex; flex-wrap: wrap; gap: 6px; font-size: .78rem; }
+.stages span { padding: 2px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+.stages span.on { background: var(--accent); color: var(--accent-ink); }
+.stages span.done { color: var(--ok); }
+.stages span.skip { text-decoration: line-through; }
+.status { font-size: .85rem; padding: 8px 10px; border-radius: 8px; background: var(--chip); }
+.status.ok { color: var(--ok); } .status.bad { color: var(--bad); }
+.ai-out { font-size: .88rem; white-space: pre-wrap; background: var(--chip); border-radius: 8px; padding: 10px; max-height: 240px; overflow: auto; }
+.sugg { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.sugg label { display: grid; grid-template-columns: 22px 1fr; gap: 8px; font-size: .85rem; align-items: start; padding: 6px 8px; border-radius: 8px; background: var(--chip); }
+.sugg input { width: 18px; height: 18px; accent-color: var(--accent); margin-top: 2px; }
+.logbox { font-family: var(--font-mono); font-size: .72rem; white-space: pre-wrap; max-height: 160px; overflow: auto; color: var(--muted); }
+
+.desk { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.sheet-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sheet-tools .sp { flex: 1; }
+.badge { font-size: .78rem; padding: 3px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); }
+.badge.example { background: #fff3cd; color: #6b4e00; }
+.stats { font-size: .82rem; color: var(--muted); }
+.paper { background: var(--paper); border-radius: 4px; box-shadow: var(--shadow); padding: 26px 22px 30px; color: #2b2f36; min-width: 0; position: relative; }
+.paper::before { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 4px; background-image: radial-gradient(rgba(60,70,90,.035) 1px, transparent 1.2px); background-size: 7px 7px; }
+.paper-head { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; align-items: end; border-bottom: 1.5px solid rgba(43,47,54,.25); padding-bottom: 8px; margin-bottom: 8px; position: relative; }
+.paper-head input { font-family: var(--font-hand); font-size: 2.3rem; line-height: 1.1; border: 0; background: transparent; color: #222831; width: 100%; padding: 0; min-width: 0; }
+.paper-head .meta { font-family: var(--font-hand); font-size: 1.35rem; color: #3b414b; text-align: right; }
+.legend { font-family: var(--font-hand); font-size: 1.15rem; color: #2547b0; display: flex; flex-wrap: wrap; gap: 2px 14px; position: relative; margin-bottom: 4px; }
+.systems { display: flex; flex-direction: column; position: relative; }
+.systems canvas { width: 100%; display: block; touch-action: manipulation; }
+
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel); border-top: 1px solid var(--line);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.player .time { font-family: var(--font-mono); font-size: .85rem; font-variant-numeric: tabular-nums; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { min-height: 40px; padding: 0 12px; border: 0; background: transparent; font-size: .88rem; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.player input[type=range] { flex: 1 1 160px; accent-color: var(--accent); min-width: 120px; }
+
+.editor { position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.scrim { position: fixed; inset: 0; z-index: 25; background: rgba(10,15,25,.35); }
+.editor h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; gap: 8px; }
+.editor h3 small { color: var(--muted); font-weight: 400; font-family: var(--font-mono); font-size: .8rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { min-height: 40px; min-width: 44px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); font-size: .88rem; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.stepper { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stepper output { font-family: var(--font-mono); font-size: 1.2rem; min-width: 2.4em; text-align: center; }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.grp > span { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 16px; border-radius: 999px; font-size: .88rem; z-index: 40; max-width: calc(100vw - 32px); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>베이스 타브 노트</h1>
+  <p>영상이나 음원에서 베이스만 뽑아, 주법까지 적힌 손글씨 타브 악보로 옮겨 적습니다.</p>
+</header>
+
+<div class="layout">
+  <section class="bench" aria-label="작업 도구">
+    <div class="card">
+      <h2><span><span class="step">1</span> 영상·음원 불러오기</span></h2>
+      <label class="drop" id="drop" for="file">
+        <span>탭해서 영상 또는 음원 파일 선택</span>
+        <span class="hint">mp4 · mov · m4a · mp3 · wav — 사진 앱이나 파일 앱에서 가져올 수 있습니다</span>
+        <span class="filename" id="fileName"></span>
+      </label>
+      <input type="file" id="file" accept="video/*,audio/*" hidden>
+      <p class="hint">유튜브 영상은 기기에 저장(또는 화면 기록)한 뒤 불러오세요. 연주자의 손이 보이는 영상이면 손 위치로 줄·프렛을 정합니다.</p>
+    </div>
+
+    <div class="card" id="cardVideo" hidden>
+      <h2><span><span class="step">2</span> 넥 위치 맞추기</span><span class="badge" id="calibState">아직 저장 안 함</span></h2>
+      <div class="scrub">
+        <button class="btn small" id="vPrev" type="button" aria-label="1초 뒤로">−1초</button>
+        <input type="range" id="vScrub" min="0" max="1" step="0.001" value="0" aria-label="영상 위치">
+        <button class="btn small" id="vNext" type="button" aria-label="1초 앞으로">+1초</button>
+      </div>
+      <div class="videobox" id="videoBox">
+        <video id="video" playsinline webkit-playsinline preload="auto" muted></video>
+        <canvas id="calibCanvas" aria-label="넥 보정 화면"></canvas>
+      </div>
+      <p class="hint">넥이 잘 보이는 장면에서 파란 점 4개를 지판 <b>모서리</b>에 맞추세요. 왼쪽 두 점은 <b id="fALabel">너트(0프렛)</b>의 위·아래 끝, 오른쪽 두 점은 <b id="fBLabel">12프렛</b>의 위·아래 끝입니다. 점을 끌면 돋보기가 나옵니다.</p>
+      <div class="row">
+        <div class="field"><label for="fA">왼쪽 점 기준</label><select id="fA"></select></div>
+        <div class="field"><label for="fB">오른쪽 점 기준</label><select id="fB"></select></div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="topIsLow" checked> 화면 위쪽 줄이 가장 낮은 줄(E/B)</label>
+      <div class="row">
+        <button class="btn small primary" id="btnKeySave" type="button">이 장면 기준으로 저장</button>
+        <button class="btn small" id="btnHandTest" type="button">손 인식 확인</button>
+        <button class="btn small" id="btnGemNeck" type="button" hidden>Gemini로 넥 찾기</button>
+      </div>
+      <div class="keys" id="keys" aria-label="저장된 보정 장면"></div>
+      <p class="hint">카메라나 베이스가 움직이는 영상은 여러 장면에서 저장하세요. 저장한 장면 사이는 자동으로 이어 맞춥니다.</p>
+      <label class="toggle"><input type="checkbox" id="useVideo" checked> 손 위치로 줄·프렛 정하기</label>
+    </div>
+
+    <div class="card">
+      <h2><span><span class="step" id="stepSet">2</span> 설정</span></h2>
+      <div class="field"><label for="engine">음 인식 방식</label><select id="engine">
+        <option value="ai">AI 정밀 (음정 인식 AI + 신호 분석)</option>
+        <option value="dsp">빠르게 (신호 분석만)</option>
+      </select></div>
+      <div class="field"><label for="tuning">베이스 · 튜닝</label><select id="tuning"></select></div>
+      <div class="field"><label for="bpm">BPM (0 = 자동)</label><input type="number" id="bpm" min="0" max="260" step="0.5" value="0"></div>
+      <div class="field"><label for="meter">박자</label><select id="meter"><option value="4">4/4</option><option value="3">3/4</option><option value="2">2/4</option><option value="6">6/4</option></select></div>
+      <div class="field"><label for="sens">주법 감지 민감도</label><output id="sensOut">보통</output><input type="range" id="sens" min="0" max="1" step="0.05" value="0.5"></div>
+      <details class="adv">
+        <summary>저음 필터 · 구간 · 세부 설정</summary>
+        <div>
+          <div class="field"><label for="hp">저음 필터 아래 경계</label><output id="hpOut">32 Hz</output><input type="range" id="hp" min="20" max="60" step="1" value="32"></div>
+          <div class="field"><label for="lp">저음 필터 위 경계</label><output id="lpOut">330 Hz</output><input type="range" id="lp" min="180" max="700" step="10" value="330"></div>
+          <p class="hint">베이스 솔로처럼 높은 음이 많으면 위 경계를 올리고, 기타·보컬이 섞여 들어오면 내리세요.</p>
+          <div class="field"><label for="rStart">분석 시작(초)</label><input type="number" id="rStart" min="0" step="1" value="0"></div>
+          <div class="field"><label for="rEnd">분석 끝(초, 0 = 끝까지)</label><input type="number" id="rEnd" min="0" step="1" value="0"></div>
+          <div class="field"><label for="aiSens">AI 음 인식 민감도</label><output id="aiSensOut">보통</output><input type="range" id="aiSens" min="0" max="1" step="0.05" value="0.5"></div>
+          <label class="toggle"><input type="checkbox" id="kick" checked> 킥드럼 억제</label>
+          <label class="toggle"><input type="checkbox" id="dead" checked> 데드노트(x) 감지</label>
+          <label class="toggle"><input type="checkbox" id="showUnsure" checked> 확실하지 않은 음에 ? 표시</label>
+          <div class="field"><label for="maxFret">최고 프렛</label><input type="number" id="maxFret" min="12" max="24" value="20"></div>
+        </div>
+      </details>
+      <button class="btn primary" id="btnAnalyze" type="button" disabled>파일을 먼저 불러오세요</button>
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><i id="progBar"></i></div>
+        <div class="stages" id="stages"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span><span class="step">AI</span> Gemini 연결</span><span class="badge" id="gemState">연결 안 됨</span></h2>
+      <p class="hint">Google AI Studio에서 발급한 API 키를 넣으세요. 키는 이 기기의 브라우저에만 저장됩니다. Gemini Pro 구독과 API 사용량은 따로 계산됩니다.</p>
+      <div class="field wide"><label for="gemKey">API 키</label><input type="password" id="gemKey" autocomplete="off" spellcheck="false" placeholder="AIza…"></div>
+      <div class="row"><button class="btn small" id="gemConnect" type="button">연결 확인</button><a class="btn small" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">API 키 발급</a></div>
+      <div class="field wide" id="gemModelRow" hidden><label for="gemModel">모델</label><select id="gemModel"></select></div>
+      <div id="gemTools" hidden>
+        <div class="field wide"><label for="ytUrl">유튜브 주소 (곡 정보용, 선택)</label><input type="url" id="ytUrl" placeholder="https://www.youtube.com/watch?v=…" spellcheck="false"></div>
+        <div class="row"><button class="btn small" id="btnSongInfo" type="button">곡 정보 받기 (BPM·키·박자)</button></div>
+        <div class="row"><button class="btn small primary" id="btnReview" type="button" disabled>Gemini로 악보 검토</button><button class="btn small" id="btnStop" type="button" hidden>멈추기</button></div>
+        <p class="hint">검토는 베이스만 걸러낸 소리를 40초씩 Gemini에게 들려주고 틀린 음·빠진 음·주법을 고칠 제안을 받습니다. 제안은 골라서 적용합니다.</p>
+      </div>
+      <div class="ai-out" id="aiOut" hidden></div>
+      <div class="sugg" id="sugg" hidden></div>
+      <div class="row"><button class="btn small" id="btnApply" type="button" hidden>선택한 제안 적용</button></div>
+    </div>
+
+    <div class="card">
+      <h2><span>저장 · 내보내기</span></h2>
+      <div class="row">
+        <button class="btn small" id="btnPdf" type="button">PDF</button>
+        <button class="btn small" id="btnPng" type="button">PNG</button>
+        <button class="btn small" id="btnTxt" type="button">텍스트 타브</button>
+      </div>
+      <div class="row">
+        <button class="btn small" id="btnSave" type="button">작업 저장(.json)</button>
+        <label class="btn small" for="loadJson">작업 불러오기</label>
+        <input type="file" id="loadJson" accept="application/json,.json" hidden>
+      </div>
+      <details class="adv"><summary>진단 기록</summary><div><div class="logbox" id="logbox"></div></div></details>
+    </div>
+  </section>
+
+  <section class="desk" aria-label="타브 악보">
+    <div class="sheet-tools">
+      <span class="badge example" id="exBadge">예시 악보 — 파일을 분석하면 바뀝니다</span>
+      <span class="stats" id="stats"></span>
+      <span class="sp"></span>
+      <button class="btn small" id="btnUndo" type="button" disabled>되돌리기</button>
+      <button class="btn small" id="beatL" type="button" title="박 위치를 16분음표 하나만큼 앞으로">◂ 박</button>
+      <button class="btn small" id="beatR" type="button" title="박 위치를 16분음표 하나만큼 뒤로">박 ▸</button>
+    </div>
+    <div class="paper" id="paper">
+      <div class="paper-head">
+        <input id="title" value="예시 — Walking in A" aria-label="곡 제목">
+        <div class="meta" id="meta"></div>
+      </div>
+      <div class="legend" id="legend">
+        <span>H 해머링</span><span>P 풀링</span><span>/ \ 슬라이드</span><span>T 태핑</span><span>↑ 벤딩</span><span>~ 비브라토</span><span>x 데드</span><span>( ) 고스트</span><span>&lt; &gt; 하모닉</span><span>S 슬랩</span><span>Po 팝</span>
+      </div>
+      <div class="systems" id="systems"></div>
+    </div>
+    <p class="hint">음표를 탭하면 프렛·줄·주법을 고칠 수 있고, 빈 칸을 탭하면 음을 추가합니다. 흐리게 쓰고 ?를 붙인 음은 확실하지 않은 음입니다.</p>
+  </section>
+</div>
+
+<div class="player" id="player">
+  <button class="btn small" id="btnPlay" type="button" disabled aria-label="재생">▶ 재생</button>
+  <div class="seg" role="group" aria-label="재생 소리">
+    <button type="button" id="srcMix" aria-pressed="true">원곡</button>
+    <button type="button" id="srcBass" aria-pressed="false">베이스만</button>
+  </div>
+  <select id="rate" aria-label="재생 속도" class="btn small"><option value="1">1×</option><option value="0.75">0.75×</option><option value="0.5">0.5×</option></select>
+  <input type="range" id="seek" min="0" max="1" step="0.001" value="0" aria-label="재생 위치">
+  <span class="time" id="time">0:00 / 0:00</span>
+</div>
+
+<audio id="audio" preload="auto" hidden></audio>
+<div id="toast" class="toast" hidden></div>
+<div id="scrim" class="scrim" hidden></div>
+<div id="editor" class="editor" hidden role="dialog" aria-modal="true" aria-labelledby="edTitle"></div>
+
+<script src="core.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
