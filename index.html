@@ -661,9 +661,10 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
     </div>
     <div class="card">
       <h2><span>Gemini</span><span class="badge" id="setGemState">연결 안 됨</span></h2>
-      <p class="hint">AI 악보 만들기와 채보 검토에 씁니다. Google AI Studio에서 발급한 API 키를 넣으세요. 키는 이 기기의 브라우저에만 저장됩니다.</p>
+      <p class="hint">AI 악보 만들기와 채보 검토에 씁니다. Google AI Studio에서 발급한 API 키를 넣으세요.</p>
+      <p class="hint" id="setGemWhere">키는 이 기기에만 저장됩니다. 로그인하면 내 계정에 저장되어 다른 기기에서도 로그인만 하면 자동으로 연결됩니다.</p>
       <div class="field wide"><label for="setGemKey">API 키</label><input type="password" id="setGemKey" autocomplete="off" spellcheck="false" placeholder="AIza…"></div>
-      <div class="row"><button class="btn small" type="button" id="setGemConnect">연결 확인</button><a class="btn small" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">API 키 발급</a></div>
+      <div class="row"><button class="btn small" type="button" id="setGemConnect">연결 확인</button><a class="btn small" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">API 키 발급</a><button class="btn small" type="button" id="setGemForget">키 지우기</button></div>
       <div class="field wide" id="setGemModelRow" hidden><label for="setGemModel">모델</label><select id="setGemModel"></select></div>
     </div>
     <div class="card">

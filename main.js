@@ -92,8 +92,17 @@ $('mtVol').addEventListener('change', () => store.saveSettings({ clickVol: +$('m
 $('setMinSec').addEventListener('change', () => store.saveSettings({ minSec: Math.max(5, +$('setMinSec').value || 20) }));
 
 // Gemini (채보 탭과 같은 키 저장소를 씀)
+// Gemini 키: 이 기기(localStorage) + 로그인하면 내 계정(Firestore users/내uid/settings/gemini, 본인만 읽기)
+// 채보 탭과 같은 키 저장소(bt.gemKey)를 함께 씀
 const gem = { key: ls.get('bt.gemKey', ''), model: ls.get('bt.gemModel', ''), ok: false };
 $('setGemKey').value = gem.key;
+const cloudGem = () => store.user ? store.get('settings', 'gemini') : null;
+async function saveGemCloud() {
+  if (!store.user || !gem.key) return;
+  const c = cloudGem();
+  if (c && c.key === gem.key && c.model === gem.model) return;
+  await store.put('settings', { id: 'gemini', key: gem.key, model: gem.model });
+}
 async function gemConnect(quiet) {
   const key = $('setGemKey').value.trim(); if (!key) { if (!quiet) toast('API 키를 넣어 주세요'); return; }
   const b = $('setGemConnect'); b.disabled = true; b.textContent = '확인 중…';
@@ -105,14 +114,47 @@ async function gemConnect(quiet) {
     sel.value = ms.some(m => m.id === gem.model) ? gem.model : ms[0].id; gem.model = sel.value; ls.set('bt.gemModel', gem.model);
     $('setGemModelRow').hidden = false; gem.ok = true;
     // 채보 탭도 같은 키로 연결
-    const tk = $('gemKey'); if (tk && !tk.value) { tk.value = key; $('gemConnect') && $('gemConnect').click(); }
-    if (!quiet) toast('Gemini에 연결했습니다');
+    const tk = $('gemKey'); if (tk && tk.value !== key) { tk.value = key; $('gemConnect') && $('gemConnect').click(); }
+    await saveGemCloud();
+    if (!quiet) toast(store.user ? 'Gemini에 연결했고, 키를 내 계정에 저장했습니다' : 'Gemini에 연결했습니다');
   } catch (e) { gem.ok = false; if (!quiet) toast(e.message, 6000); }
   b.disabled = false; b.textContent = '연결 확인'; gemState();
 }
-function gemState() { const t = gem.ok ? '연결됨' : '연결 안 됨'; $('setGemState').textContent = t; $('genState').textContent = 'Gemini ' + t; $('genGo').disabled = !gem.ok; }
+function gemState() {
+  const t = gem.ok ? '연결됨' : '연결 안 됨'; $('setGemState').textContent = t; $('genState').textContent = 'Gemini ' + t; $('genGo').disabled = !gem.ok;
+  const c = cloudGem();
+  $('setGemWhere').textContent = store.user
+    ? (c && c.key ? '키가 내 계정에 저장되어 있습니다. 다른 기기에서도 로그인하면 자동으로 연결됩니다.' : '로그인되어 있습니다. 연결 확인을 누르면 키가 내 계정에 저장됩니다.')
+    : '키는 이 기기에만 저장됩니다. 로그인하면 내 계정에 저장되어 다른 기기에서도 로그인만 하면 자동으로 연결됩니다.';
+  $('setGemForget').hidden = !gem.key && !(c && c.key);
+}
+// 로그인·동기화 후: 계정에 키가 있으면 이 기기에 적용, 이 기기에만 있으면 계정에 올림
+let gemSyncing = false;
+async function syncGemFromCloud() {
+  if (gemSyncing || !store.user) return;
+  const c = cloudGem();
+  gemSyncing = true;
+  try {
+    if (c && c.key && c.key !== gem.key) {
+      gem.key = c.key; if (c.model) gem.model = c.model;
+      ls.set('bt.gemKey', gem.key); if (c.model) ls.set('bt.gemModel', c.model);
+      $('setGemKey').value = gem.key;
+      await gemConnect(true);
+    } else if ((!c || !c.key) && gem.key && gem.ok) await saveGemCloud();
+  } finally { gemSyncing = false; gemState(); }
+}
+store.onChange(what => { if (what === 'data' || what === 'auth') syncGemFromCloud(); });
 $('setGemConnect').addEventListener('click', () => gemConnect(false));
-$('setGemModel').addEventListener('change', () => { gem.model = $('setGemModel').value; ls.set('bt.gemModel', gem.model); });
+$('setGemModel').addEventListener('change', () => { gem.model = $('setGemModel').value; ls.set('bt.gemModel', gem.model); saveGemCloud(); });
+$('setGemForget').addEventListener('click', async () => {
+  const b = $('setGemForget');
+  if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = store.user ? '이 기기와 계정에서 지우기' : '정말 지우기'; setTimeout(() => { delete b.dataset.armed; b.textContent = '키 지우기'; }, 3000); return; }
+  gem.key = ''; gem.ok = false; $('setGemKey').value = ''; $('setGemModelRow').hidden = true;
+  try { localStorage.removeItem('bt.gemKey'); } catch (e) { /* 무시 */ }
+  if (store.user && cloudGem()) await store.del('settings', 'gemini');
+  delete b.dataset.armed; b.textContent = '키 지우기';
+  gemState(); toast('Gemini 키를 지웠습니다');
+});
 if (gem.key) gemConnect(true); else gemState();
 
 // 백업
