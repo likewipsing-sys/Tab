@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="베이스 타브">
+<meta name="apple-mobile-web-app-title" content="베이스 연습">
 <meta name="theme-color" content="#e6e9ed">
-<title>베이스 타브 노트</title>
+<title>베이스 연습 노트</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Nanum+Pen+Script&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -75,9 +75,14 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
 .scrub { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
 .scrub input { width: 100%; accent-color: var(--accent); }
 .mono { font-family: var(--font-mono); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.trackbar { width: 100%; height: 18px; border-radius: 4px; background: var(--chip); cursor: pointer; touch-action: none; }
+.steps { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+.steps b { color: var(--ink); font-weight: 600; }
 .keys { display: flex; flex-wrap: wrap; gap: 6px; }
-.keys button { min-height: 32px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); padding: 0 10px; font-family: var(--font-mono); font-size: .8rem; }
-.keys button.cur { border-color: var(--accent); color: var(--accent); }
+.keychip { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.keychip button { min-height: 34px; border: 0; background: var(--chip); padding: 0 10px; font-family: var(--font-mono); font-size: .8rem; }
+.keychip button + button { border-left: 1px solid var(--line); padding: 0 10px; }
+.keychip button.cur { color: var(--accent); font-weight: 600; }
 
 .progress { display: flex; flex-direction: column; gap: 6px; }
 .bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
@@ -133,14 +138,302 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
 .grp > span { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 16px; border-radius: 999px; font-size: .88rem; z-index: 40; max-width: calc(100vw - 32px); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* ---------------- 연습 앱 셸 ---------------- */
+body { padding-top: 0; }
+.appbar { position: sticky; top: 0; z-index: 22; background: var(--bg); margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding: max(10px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); }
+.appbar-row { display: flex; align-items: center; gap: 12px; max-width: 1500px; margin: 0 auto; }
+.appbar h1 { font-family: var(--font-hand); font-weight: 400; font-size: 2.1rem; line-height: 1; margin: 0; white-space: nowrap; }
+.appbar .sp { flex: 1; }
+.mini-metro { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 12px; background: var(--panel); }
+.mini-metro .mono { min-width: 3.2em; text-align: right; }
+.mini-metro button { min-height: 34px; min-width: 34px; border-radius: 999px; border: 0; background: var(--chip); }
+.mini-metro button.on { background: var(--accent); color: var(--accent-ink); }
+.userchip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px 3px 3px; background: var(--panel); min-height: 40px; font-size: .85rem; }
+.userchip img, .userchip .av { width: 32px; height: 32px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; font-weight: 600; }
+.ctrlmore { display: contents; }
+#plMoreBtn { display: none; }
+@media (max-width: 620px) {
+  #plMoreBtn { display: inline-flex; }
+  .ctrlmore { display: none; width: 100%; flex-wrap: wrap; gap: 8px; }
+  .ctrlmore.open { display: flex; }
+  .ctrlbar .grow { flex-basis: 140px; }
+  .paper-head { grid-template-columns: minmax(0, 1fr); }
+  .paper-head .meta { text-align: left; font-size: 1.15rem; }
+  .paper-head input { font-size: 1.9rem; }
+  .appbar h1 { font-size: 1.45rem; }
+  #userName { display: none; }
+  .userchip { padding-right: 3px; }
+  .mini-metro { padding-left: 8px; }
+  .appbar-row { gap: 8px; }
+}
+.tabs { display: flex; gap: 2px; overflow-x: auto; max-width: 1500px; margin: 8px auto 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--muted); font-weight: 500; border-bottom: 2.5px solid transparent; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.view { max-width: 1500px; margin: 16px auto 0; display: flex; flex-direction: column; gap: 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; align-items: start; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+.stats4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; }
+h2.sec { font-size: 1.05rem; margin: 4px 0 0; }
+.chip.sm { min-height: 34px; font-size: .82rem; }
+.chips.wrap { flex-wrap: wrap; }
+.statnum { font-family: var(--font-mono); font-size: 1.9rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.statlbl { font-size: .8rem; color: var(--muted); }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.weekbars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 110px; }
+.weekbars div { display: flex; flex-direction: column; align-items: center; justify-content: end; gap: 4px; height: 100%; font-size: .72rem; color: var(--muted); }
+.weekbars i { display: block; width: 100%; max-width: 34px; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; }
+.weekbars .today i { background: var(--ok); }
+.techbars { display: flex; flex-direction: column; gap: 6px; }
+.techbars .r { display: grid; grid-template-columns: 7.5em 1fr 4.5em; gap: 8px; align-items: center; font-size: .82rem; }
+.techbars .tr { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; }
+.techbars .tr i { display: block; height: 100%; background: var(--accent); }
+.list { display: flex; flex-direction: column; gap: 6px; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--chip); }
+.item .t { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.item .s { font-size: .8rem; color: var(--muted); grid-column: 1; }
+.item .acts { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; }
+.badge.tech { background: var(--accent); color: var(--accent-ink); }
+.empty { color: var(--muted); font-size: .9rem; padding: 14px; border: 1.5px dashed var(--line); border-radius: 10px; text-align: center; }
+
+/* 메트로놈 */
+.metro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 800px) { .metro { grid-template-columns: minmax(0, 1fr); } }
+.bigbpm { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.bigbpm output { font-family: var(--font-mono); font-size: 4.2rem; line-height: 1; font-variant-numeric: tabular-nums; min-width: 3ch; text-align: center; }
+.bigbpm button { width: 56px; height: 56px; border-radius: 50%; font-size: 1.6rem; border: 1px solid var(--line); background: var(--chip); }
+.lights { display: flex; gap: 10px; justify-content: center; min-height: 34px; flex-wrap: wrap; }
+.lights i { width: 30px; height: 30px; border-radius: 50%; background: var(--chip); border: 1px solid var(--line); transition: background .05s; }
+.lights i.acc { border-color: var(--accent); }
+.lights i.on { background: var(--accent); }
+.lights i.on.acc { background: var(--warn); }
+.bigplay { min-height: 64px; font-size: 1.2rem; }
+input[type=range].full { width: 100%; accent-color: var(--accent); height: 30px; }
+
+/* 연습 재생 */
+.ctrlbar { position: sticky; bottom: 0; z-index: 15; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; box-shadow: var(--shadow); margin-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+.ctrlbar .grow { flex: 1 1 180px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ctrlbar .grow input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.ctrlbar .mono { min-width: 5.5em; }
+.toggle.btnlike { border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: var(--chip); min-height: 38px; }
+.count { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 35; font-family: var(--font-mono); font-size: 9rem; color: var(--accent); opacity: .85; }
+.tips { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.playhead-info { font-size: .85rem; color: var(--muted); }
+
+/* PDF 보기 */
+.pdfview { position: fixed; inset: 0; z-index: 50; background: #3a3f46; display: flex; flex-direction: column; }
+.pdf-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: max(8px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px)); background: var(--panel); border-bottom: 1px solid var(--line); }
+.pdf-bar .name { font-weight: 600; min-width: 0; flex: 1 1 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-bar .grow { flex: 1 1 200px; display: flex; gap: 8px; align-items: center; }
+.pdf-bar .grow input { flex: 1; accent-color: var(--accent); min-width: 0; }
+.pdf-scroll { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; }
+.pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px 8px 50vh; }
+.pdf-page { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+.pdf-page canvas { width: 100%; height: 100%; display: block; }
+.pdf-guide { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed rgba(255,190,0,.0); pointer-events: none; }
+body.pdf-open { overflow: hidden; }
+.pdf-status { font-family: var(--font-mono); font-size: .82rem; color: var(--muted); }
+
+/* 채보 화면: 원래 하단 재생 막대는 채보 탭에서만 */
+.player { display: none; }
+body.view-trans .player { display: flex; }
+#v-trans .layout { margin: 0; }
+textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px; width: 100%; min-height: 70px; resize: vertical; }
 </style>
 </head>
 <body>
-<header class="top">
-  <h1>베이스 타브 노트</h1>
-  <p>영상이나 음원에서 베이스만 뽑아, 주법까지 적힌 손글씨 타브 악보로 옮겨 적습니다.</p>
-</header>
+<div class="appbar">
+  <div class="appbar-row">
+    <h1>베이스 연습 노트</h1>
+    <span class="sp"></span>
+    <div class="mini-metro" aria-label="메트로놈">
+      <span class="mono" id="mmBpm">♩ 90</span>
+      <button type="button" id="mmToggle" aria-label="메트로놈 켜기">▶</button>
+    </div>
+    <button type="button" class="userchip" id="userChip"><span class="av" id="userAv">?</span><span id="userName">로그인</span></button>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="화면">
+    <button role="tab" data-v="home" aria-selected="true">홈</button>
+    <button role="tab" data-v="metro" aria-selected="false">메트로놈</button>
+    <button role="tab" data-v="practice" aria-selected="false">주법 연습</button>
+    <button role="tab" data-v="ai" aria-selected="false">AI 악보</button>
+    <button role="tab" data-v="lib" aria-selected="false">라이브러리</button>
+    <button role="tab" data-v="trans" aria-selected="false">채보</button>
+    <button role="tab" data-v="settings" aria-selected="false">설정</button>
+  </nav>
+</div>
 
+<!-- 홈 -->
+<section class="view" id="v-home">
+  <div class="card" id="hmLogin" hidden>
+    <h2><span>로그인</span></h2>
+    <p class="hint" id="hmLoginMsg">Google 계정으로 로그인하면 연습 기록과 악보가 계정에 저장되어 다른 기기에서도 이어서 볼 수 있습니다. 로그인하지 않아도 이 기기에 저장됩니다.</p>
+    <div class="row"><button class="btn primary" type="button" id="hmLoginBtn">Google로 로그인</button></div>
+  </div>
+  <div class="stats4">
+    <div class="card stat"><span class="statlbl">오늘 연습</span><span class="statnum" id="hmToday">0분</span></div>
+    <div class="card stat"><span class="statlbl">연속 연습</span><span class="statnum" id="hmStreak">0일</span></div>
+    <div class="card stat"><span class="statlbl">이번 주</span><span class="statnum" id="hmWeek">0분</span></div>
+    <div class="card stat"><span class="statlbl">저장한 악보</span><span class="statnum" id="hmTabs">0개</span></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h2><span>최근 7일</span></h2>
+      <div class="weekbars" id="hmWeekBars"></div>
+    </div>
+    <div class="card">
+      <h2><span>주법별 연습 시간</span></h2>
+      <div class="techbars" id="hmTech"></div>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h2><span>오늘의 추천</span></h2>
+      <p class="hint" id="hmSuggestMsg"></p>
+      <div class="row"><button class="btn primary" type="button" id="hmSuggestGo">바로 연습</button></div>
+    </div>
+    <div class="card">
+      <h2><span>최근 연습</span></h2>
+      <div class="list" id="hmRecent"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 메트로놈 -->
+<section class="view" id="v-metro" hidden>
+  <div class="metro">
+    <div class="card">
+      <div class="bigbpm">
+        <button type="button" id="mtMinus" aria-label="BPM 1 내리기">−</button>
+        <output id="mtBpm">90</output>
+        <button type="button" id="mtPlus" aria-label="BPM 1 올리기">+</button>
+      </div>
+      <input type="range" class="full" id="mtSlider" min="30" max="260" value="90" aria-label="BPM">
+      <div class="lights" id="mtLights"></div>
+      <div class="row">
+        <button class="btn primary bigplay" type="button" id="mtStart">▶ 시작</button>
+        <button class="btn bigplay" type="button" id="mtTap">탭 템포</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="field"><label for="mtBeats">박자</label><select id="mtBeats"><option value="2">2/4</option><option value="3">3/4</option><option value="4" selected>4/4</option><option value="5">5/4</option><option value="6">6/4</option><option value="7">7/4</option></select></div>
+      <div class="grp"><span>박 나누기</span><div class="chips" id="mtSub">
+        <button type="button" class="chip" data-sub="1" aria-pressed="true">♩</button><button type="button" class="chip" data-sub="2" aria-pressed="false">♪♪ 8분</button><button type="button" class="chip" data-sub="3" aria-pressed="false">3연음</button><button type="button" class="chip" data-sub="4" aria-pressed="false">16분</button></div></div>
+      <label class="toggle"><input type="checkbox" id="mtAccent" checked> 첫 박 강조</label>
+      <details class="adv" open>
+        <summary>점점 빠르게 (스피드 트레이너)</summary>
+        <div>
+          <label class="toggle"><input type="checkbox" id="mtTrain"> 사용</label>
+          <div class="field"><label for="mtStep">몇 BPM씩 올릴까요</label><input type="number" id="mtStep" min="1" max="20" value="4"></div>
+          <div class="field"><label for="mtEvery">몇 마디마다</label><input type="number" id="mtEvery" min="1" max="32" value="4"></div>
+          <div class="field"><label for="mtMax">최고 BPM</label><input type="number" id="mtMax" min="40" max="300" value="140"></div>
+        </div>
+      </details>
+      <details class="adv">
+        <summary>소리 끊기 (박자감 훈련)</summary>
+        <div>
+          <p class="hint">정해진 마디만큼 클릭이 사라졌다가 돌아옵니다. 그동안 박자를 혼자 지키는 연습입니다.</p>
+          <label class="toggle"><input type="checkbox" id="mtGap"> 사용</label>
+          <div class="field"><label for="mtGapPlay">들리는 마디</label><input type="number" id="mtGapPlay" min="1" max="16" value="2"></div>
+          <div class="field"><label for="mtGapMute">안 들리는 마디</label><input type="number" id="mtGapMute" min="1" max="16" value="2"></div>
+        </div>
+      </details>
+      <div class="field"><label for="mtVol">클릭 음량</label><output id="mtVolOut">80%</output><input type="range" id="mtVol" min="0" max="1" step="0.05" value="0.8"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 주법 연습 -->
+<section class="view" id="v-practice" hidden>
+  <div class="card">
+    <h2><span>무엇을 연습할까요</span></h2>
+    <div class="chips wrap" id="prTech"></div>
+    <div class="grid3" id="prOpts"></div>
+    <div class="row"><button class="btn primary" type="button" id="prMake">연습 악보 만들기</button><button class="btn" type="button" id="prAgain" hidden>다른 패턴으로</button></div>
+    <p class="hint" id="prHint"></p>
+  </div>
+</section>
+
+<!-- AI 악보 -->
+<section class="view" id="v-ai" hidden>
+  <div class="card">
+    <h2><span>AI 연습 악보 만들기</span><span class="badge" id="genState">Gemini 연결 안 됨</span></h2>
+    <div class="grp"><span>장르</span><div class="chips wrap" id="genGenre"></div></div>
+    <div class="grp"><span>주법</span><div class="chips wrap" id="genTech"></div></div>
+    <div class="grp"><span>난이도</span><div class="chips wrap" id="genDiff"></div></div>
+    <div class="grid3">
+      <div class="field"><label for="genKey">조성</label><select id="genKey"></select></div>
+      <div class="field"><label for="genBars">마디 수</label><select id="genBars"><option>4</option><option selected>8</option><option>12</option><option>16</option></select></div>
+      <div class="field"><label for="genBpm">BPM</label><input type="number" id="genBpm" min="40" max="240" value="90"></div>
+      <div class="field"><label for="genTuning">베이스</label><select id="genTuning"></select></div>
+    </div>
+    <div class="field wide"><label for="genExtra">추가 요청 (선택)</label><textarea id="genExtra" placeholder="예: 마커스 밀러 느낌으로, 8마디째는 필인으로, 7프렛 근처에서만"></textarea></div>
+    <div class="row">
+      <button class="btn primary" type="button" id="genGo">Gemini로 만들기</button>
+      <button class="btn" type="button" id="genRule">AI 없이 만들기 (규칙 기반)</button>
+      <button class="btn" type="button" id="genStop" hidden>멈추기</button>
+    </div>
+    <p class="hint" id="genMsg">Gemini API 키는 설정 탭에서 넣습니다. 키가 없어도 'AI 없이 만들기'로 장르·주법에 맞는 연습 패턴을 만들 수 있습니다.</p>
+  </div>
+</section>
+
+<!-- 라이브러리 -->
+<section class="view" id="v-lib" hidden>
+  <div class="seg" role="group" aria-label="라이브러리 종류">
+    <button type="button" id="libTabsBtn" aria-pressed="true">내 악보</button>
+    <button type="button" id="libPdfBtn" aria-pressed="false">PDF 악보</button>
+  </div>
+  <div class="card" id="libTabsCard">
+    <h2><span>내 악보</span></h2>
+    <div class="chips wrap" id="libFilter"></div>
+    <div class="list" id="libTabs"></div>
+  </div>
+  <div class="card" id="libPdfCard" hidden>
+    <h2><span>PDF 악보</span></h2>
+    <label class="drop" for="libPdfFile"><span>탭해서 PDF 악보 가져오기</span><span class="hint">다른 사람이 만든 타브 악보 PDF를 넣으면 자동 스크롤로 보면서 연습할 수 있습니다</span></label>
+    <input type="file" id="libPdfFile" accept="application/pdf,.pdf" multiple hidden>
+    <div class="list" id="libPdfs"></div>
+  </div>
+</section>
+
+<!-- 악보 연습 (재생) -->
+<section class="view" id="v-play" hidden>
+  <div class="sheet-tools">
+    <button class="btn small" type="button" id="plBack">◂ 뒤로</button>
+    <span class="badge tech" id="plTech"></span>
+    <span class="badge" id="plSource"></span>
+    <span class="sp"></span>
+    <button class="btn small" type="button" id="plSave">라이브러리에 저장</button>
+    <button class="btn small" type="button" id="plPdf">PDF로 저장</button>
+  </div>
+  <div class="paper">
+    <div class="paper-head"><input id="plTitle" aria-label="악보 제목"><div class="meta" id="plMeta"></div></div>
+    <div class="legend"><span>H 해머링</span><span>P 풀링</span><span>/ \ 슬라이드</span><span>S 슬랩(엄지)</span><span>Po 팝</span><span>x 고스트</span><span>&lt; &gt; 하모닉</span><span>~ 비브라토</span></div>
+    <div class="systems" id="plSystems"></div>
+  </div>
+  <div class="card" id="plInfo">
+    <p class="hint" id="plDesc"></p>
+    <ul class="tips" id="plTips"></ul>
+    <p class="hint" id="plFixes"></p>
+    <p class="playhead-info">악보의 마디를 탭하면 구간 반복을 정합니다: 첫 탭 = 시작 마디, 두 번째 탭 = 끝 마디.</p>
+  </div>
+  <div class="ctrlbar">
+    <button class="btn primary" type="button" id="plPlay">▶ 연습 시작</button>
+    <div class="grow"><button class="btn small" type="button" id="plSlower" aria-label="느리게">−</button><input type="range" id="plBpm" min="30" max="260" aria-label="BPM"><button class="btn small" type="button" id="plFaster" aria-label="빠르게">+</button><span class="mono" id="plBpmOut">♩ 90</span></div>
+    <button class="btn small" type="button" id="plMoreBtn" aria-expanded="false">옵션</button>
+    <div class="ctrlmore" id="plMore">
+    <label class="toggle btnlike"><input type="checkbox" id="plCount" checked> 예비박</label>
+    <label class="toggle btnlike"><input type="checkbox" id="plClick" checked> 클릭</label>
+    <label class="toggle btnlike"><input type="checkbox" id="plBass" checked> 베이스 소리</label>
+    <label class="toggle btnlike"><input type="checkbox" id="plTrain"> 반복마다 +<input type="number" id="plStep" min="1" max="20" value="4" style="width:3.2em" aria-label="올릴 BPM"> BPM</label>
+    <span class="mono" id="plLoop">전체 반복</span>
+    </div>
+    <button class="btn small" type="button" id="plLoopClear" hidden>구간 해제</button>
+  </div>
+</section>
+
+<!-- 채보 -->
+<section class="view" id="v-trans" hidden>
 <div class="layout">
   <section class="bench" aria-label="작업 도구">
     <div class="card">
@@ -155,29 +448,39 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
     </div>
 
     <div class="card" id="cardVideo" hidden>
-      <h2><span><span class="step">2</span> 넥 위치 맞추기</span><span class="badge" id="calibState">아직 저장 안 함</span></h2>
+      <h2><span><span class="step">2</span> 넥 맞추기 · 추적</span><span class="badge" id="calibState">아직 안 맞춤</span></h2>
       <div class="scrub">
         <button class="btn small" id="vPrev" type="button" aria-label="1초 뒤로">−1초</button>
         <input type="range" id="vScrub" min="0" max="1" step="0.001" value="0" aria-label="영상 위치">
         <button class="btn small" id="vNext" type="button" aria-label="1초 앞으로">+1초</button>
       </div>
+      <canvas id="trackBar" class="trackbar" height="18" aria-label="넥 추적 상태 (탭하면 그 장면으로 이동)" hidden></canvas>
       <div class="videobox" id="videoBox">
         <video id="video" playsinline webkit-playsinline preload="auto" muted></video>
         <canvas id="calibCanvas" aria-label="넥 보정 화면"></canvas>
       </div>
-      <p class="hint">넥이 잘 보이는 장면에서 파란 점 4개를 지판 <b>모서리</b>에 맞추세요. 왼쪽 두 점은 <b id="fALabel">너트(0프렛)</b>의 위·아래 끝, 오른쪽 두 점은 <b id="fBLabel">12프렛</b>의 위·아래 끝입니다. 점을 끌면 돋보기가 나옵니다.</p>
+      <ol class="steps">
+        <li>넥이 잘 보이는 장면에서 파란 점 4개를 지판 <b>모서리</b>에 대충 맞추세요. 왼쪽 두 점은 <b id="fALabel">너트(0프렛)</b>, 오른쪽 두 점은 <b id="fBLabel">12프렛</b> 위치입니다. 점을 끌면 돋보기가 나옵니다.</li>
+        <li><b>자동 맞춤</b>을 누르면 프렛 선과 줄에 딱 붙습니다. 흰 줄 선 4개가 실제 줄과 겹치는지 보세요.</li>
+        <li><b>넥 추적</b>을 누르면 영상 전체에서 넥을 따라갑니다. 아래 막대가 빨간 곳은 놓친 구간이니 그 장면에서 다시 맞추고 <b>다시 추적</b>을 누르세요.</li>
+      </ol>
       <div class="row">
         <div class="field"><label for="fA">왼쪽 점 기준</label><select id="fA"></select></div>
         <div class="field"><label for="fB">오른쪽 점 기준</label><select id="fB"></select></div>
       </div>
-      <label class="toggle"><input type="checkbox" id="topIsLow" checked> 화면 위쪽 줄이 가장 낮은 줄(E/B)</label>
       <div class="row">
-        <button class="btn small primary" id="btnKeySave" type="button">이 장면 기준으로 저장</button>
-        <button class="btn small" id="btnHandTest" type="button">손 인식 확인</button>
+        <button class="btn small primary" id="btnSnap" type="button">자동 맞춤</button>
+        <button class="btn small" id="btnFlipStr" type="button">줄 순서 뒤집기</button>
         <button class="btn small" id="btnGemNeck" type="button" hidden>Gemini로 넥 찾기</button>
       </div>
-      <div class="keys" id="keys" aria-label="저장된 보정 장면"></div>
-      <p class="hint">카메라나 베이스가 움직이는 영상은 여러 장면에서 저장하세요. 저장한 장면 사이는 자동으로 이어 맞춥니다.</p>
+      <p class="hint" id="strInfo">줄 순서: 화면 위쪽부터 낮은 줄</p>
+      <div class="row">
+        <button class="btn small primary" id="btnTrack" type="button">넥 추적</button>
+        <button class="btn small" id="btnKeySave" type="button">이 장면 기준 추가</button>
+        <button class="btn small" id="btnHandTest" type="button">손 인식 확인</button>
+      </div>
+      <div class="keys" id="keys" aria-label="기준 장면"></div>
+      <div class="progress" id="trackProg" hidden><div class="bar"><i id="trackBarFill"></i></div><span class="hint" id="trackMsg"></span></div>
       <label class="toggle"><input type="checkbox" id="useVideo" checked> 손 위치로 줄·프렛 정하기</label>
     </div>
 
@@ -238,6 +541,7 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
         <button class="btn small" id="btnTxt" type="button">텍스트 타브</button>
       </div>
       <div class="row">
+        <button class="btn small primary" id="btnToLib" type="button">연습 라이브러리에 저장</button>
         <button class="btn small" id="btnSave" type="button">작업 저장(.json)</button>
         <label class="btn small" for="loadJson">작업 불러오기</label>
         <input type="file" id="loadJson" accept="application/json,.json" hidden>
@@ -269,6 +573,62 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
   </section>
 </div>
 
+</section>
+
+<!-- 설정 -->
+<section class="view" id="v-settings" hidden>
+  <div class="grid2">
+    <div class="card">
+      <h2><span>계정</span><span class="badge" id="setSync"></span></h2>
+      <p class="hint" id="setAccountMsg"></p>
+      <div class="row"><button class="btn primary" type="button" id="setLogin">Google로 로그인</button><button class="btn" type="button" id="setLogout" hidden>로그아웃</button></div>
+      <details class="adv" id="setFbBox">
+        <summary>Firebase 설정 (로그인 기능 켜기)</summary>
+        <div>
+          <p class="hint">Firebase 콘솔의 <b>프로젝트 설정 → 내 앱 → SDK 설정 및 구성</b>에 나오는 <code>firebaseConfig</code> 내용을 통째로 붙여넣으세요. 자세한 순서는 README에 있습니다.</p>
+          <textarea id="setFbCfg" spellcheck="false" placeholder="const firebaseConfig = { apiKey: &quot;…&quot;, authDomain: &quot;…&quot;, projectId: &quot;…&quot;, … };"></textarea>
+          <div class="row"><button class="btn small primary" type="button" id="setFbSave">저장하고 다시 불러오기</button><button class="btn small" type="button" id="setFbClear">지우기</button></div>
+        </div>
+      </details>
+    </div>
+    <div class="card">
+      <h2><span>Gemini</span><span class="badge" id="setGemState">연결 안 됨</span></h2>
+      <p class="hint">AI 악보 만들기와 채보 검토에 씁니다. Google AI Studio에서 발급한 API 키를 넣으세요. 키는 이 기기의 브라우저에만 저장됩니다.</p>
+      <div class="field wide"><label for="setGemKey">API 키</label><input type="password" id="setGemKey" autocomplete="off" spellcheck="false" placeholder="AIza…"></div>
+      <div class="row"><button class="btn small" type="button" id="setGemConnect">연결 확인</button><a class="btn small" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">API 키 발급</a></div>
+      <div class="field wide" id="setGemModelRow" hidden><label for="setGemModel">모델</label><select id="setGemModel"></select></div>
+    </div>
+    <div class="card">
+      <h2><span>연습 기본값</span></h2>
+      <div class="field"><label for="setTuning">내 베이스</label><select id="setTuning"></select></div>
+      <div class="field"><label for="setBassVol">베이스 소리 음량</label><output id="setBassVolOut">80%</output><input type="range" id="setBassVol" min="0" max="1" step="0.05" value="0.8"></div>
+      <div class="field"><label for="setMinSec">기록으로 남길 최소 연습 시간(초)</label><input type="number" id="setMinSec" min="5" max="300" value="20"></div>
+    </div>
+    <div class="card">
+      <h2><span>백업</span></h2>
+      <p class="hint">악보와 연습 기록을 파일로 내보내거나 다시 불러옵니다 (PDF 파일은 빠짐).</p>
+      <div class="row"><button class="btn small" type="button" id="setExport">백업 파일 저장</button><label class="btn small" for="setImport">백업 불러오기</label><input type="file" id="setImport" accept=".json,application/json" hidden></div>
+    </div>
+  </div>
+</section>
+
+<!-- PDF 자동 스크롤 보기 -->
+<div class="pdfview" id="pdfView" hidden>
+  <div class="pdf-bar">
+    <button class="btn small" type="button" id="pvClose">✕ 닫기</button>
+    <span class="name" id="pvName"></span>
+    <button class="btn small primary" type="button" id="pvPlay">▶ 자동 스크롤</button>
+    <div class="grow"><span class="hint">속도</span><button class="btn small" type="button" id="pvSlower">−</button><input type="range" id="pvSpeed" min="1" max="200" value="30" aria-label="스크롤 속도"><button class="btn small" type="button" id="pvFaster">+</button></div>
+    <div class="field"><label for="pvFit">곡 길이</label><input type="text" id="pvFit" placeholder="3:30" inputmode="numeric" style="width:5em"></div>
+    <button class="btn small" type="button" id="pvFitBtn">길이에 맞추기</button>
+    <select id="pvDelay" class="btn small" aria-label="시작 전 기다리기"><option value="0">바로 시작</option><option value="3">3초 뒤</option><option value="5">5초 뒤</option><option value="10">10초 뒤</option></select>
+    <select id="pvZoom" class="btn small" aria-label="확대"><option value="1">폭 맞춤</option><option value="0.75">75%</option><option value="1.25">125%</option><option value="1.5">150%</option></select>
+    <button class="btn small" type="button" id="pvTop">맨 위로</button>
+    <span class="pdf-status" id="pvStatus"></span>
+  </div>
+  <div class="pdf-scroll"><div class="pdf-pages"></div></div>
+</div>
+
 <div class="player" id="player">
   <button class="btn small" id="btnPlay" type="button" disabled aria-label="재생">▶ 재생</button>
   <div class="seg" role="group" aria-label="재생 소리">
@@ -285,7 +645,13 @@ details.adv > div { display: flex; flex-direction: column; gap: 10px; margin-top
 <div id="scrim" class="scrim" hidden></div>
 <div id="editor" class="editor" hidden role="dialog" aria-modal="true" aria-labelledby="edTitle"></div>
 
+<div id="countBig" class="count" hidden></div>
+
 <script src="core.js"></script>
+<script src="track.js"></script>
+<script src="theory.js"></script>
+<script src="ai.js"></script>
 <script type="module" src="app.js"></script>
+<script type="module" src="main.js"></script>
 </body>
 </html>

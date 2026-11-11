@@ -62,7 +62,7 @@ function setFile(f) {
   $('fileName').textContent = f.name + ' · ' + (f.size / 1048576).toFixed(1) + ' MB';
   if (S.mediaUrl) URL.revokeObjectURL(S.mediaUrl);
   S.mediaUrl = URL.createObjectURL(f);
-  S.audioBuf = null; S.keys = []; S.cal = null; renderKeys();
+  S.audioBuf = null; S.keys = []; S.cal = null; S.vc = null; S.calFromTrack = null; S.dirFromHand = false; renderKeys(); drawTrackBar(); $('btnTrack').textContent = '넥 추적';
   $('title').value = f.name.replace(/\.[^.]+$/, '');
   $('cardVideo').hidden = !S.isVideo;
   $('stepSet').textContent = S.isVideo ? '3' : '2';
@@ -83,30 +83,70 @@ bindOut('sens', 'sensOut', v => v < 0.3 ? '낮음 (확실한 것만)' : v > 0.7 
 bindOut('aiSens', 'aiSensOut', v => v < 0.3 ? '낮음 (확실한 음만)' : v > 0.7 ? '높음 (작은 음까지)' : '보통');
 ['engine', 'tuning', 'meter', 'sens', 'aiSens', 'hp', 'lp', 'maxFret'].forEach(id => { const v = store.get('opt.' + id, null); if (v != null) { $(id).value = v; $(id).dispatchEvent(new Event('input')); } $(id).addEventListener('change', () => store.set('opt.' + id, $(id).value)); });
 $('showUnsure').addEventListener('change', render);
-$('tuning').addEventListener('change', () => { S.tuning = TUNINGS.find(t => t.id === $('tuning').value); if (S.notes.length) { pushUndo(); refret(); render(); } });
+$('tuning').addEventListener('change', () => { S.tuning = TUNINGS.find(t => t.id === $('tuning').value); strInfo(); drawCalib(); if (S.notes.length) { if (S.result) applyVideoToNotes(); pushUndo(); refret(); render(); } });
 $('meter').addEventListener('change', () => { S.beats = +$('meter').value; if (S.result) requantize(); else render(); });
 
-// ------------------------------------------------------------------ 넥 보정 (모서리 4점, 원근 반영)
+// ------------------------------------------------------------------ 넥 보정 (모서리 4점, 원근 반영) + 자동 맞춤 + 추적
+const T = window.NeckTrack;
 const vid = $('video'), cc = $('calibCanvas');
+const TW = 320;                       // 추적·자동 맞춤에 쓰는 프레임 폭
+S.topIsLow = true; S.margin = 0.12;
+S.vc = null;                          // 영상 훑기 결과 {t0, t1, frames:[{t,gray,w,h,masks,hands}], track:[{t,pts,q}]}
 const defaultCal = () => ({ pts: [[0.12, 0.42], [0.12, 0.58], [0.62, 0.40], [0.62, 0.60]], fA: +$('fA').value, fB: +$('fB').value });
 vid.addEventListener('loadedmetadata', () => {
   $('vScrub').max = vid.duration || 1;
   if (!S.cal) S.cal = defaultCal();
   seekTo(vid, Math.min(1, (vid.duration || 3) / 3)).then(drawCalib);
 });
-vid.addEventListener('seeked', () => { $('vScrub').value = vid.currentTime; drawCalib(); renderKeys(); });
+let scanning = false;
+vid.addEventListener('seeked', () => {
+  if (scanning) return;
+  $('vScrub').value = vid.currentTime;
+  followTrack(); drawCalib(); renderKeys(); drawTrackBar();
+});
 $('vScrub').addEventListener('input', () => { vid.currentTime = +$('vScrub').value; });
 $('vPrev').addEventListener('click', () => { vid.currentTime = Math.max(0, vid.currentTime - 1); });
 $('vNext').addEventListener('click', () => { vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 1); });
-$('fA').addEventListener('change', () => { if (S.cal) S.cal.fA = +$('fA').value; $('fALabel').textContent = $('fA').selectedOptions[0].textContent; drawCalib(); });
-$('fB').addEventListener('change', () => { if (S.cal) S.cal.fB = +$('fB').value; $('fBLabel').textContent = $('fB').selectedOptions[0].textContent; drawCalib(); });
-$('topIsLow').addEventListener('change', drawCalib);
-const topIsLow = () => $('topIsLow').checked;
-
-function curModel() {
-  if (S.cal) return C.neckModel(S.cal);
-  return null;
+function setRefFrets(fA, fB) {
+  // 같은 넥 위치를 유지하면서 점 기준 프렛만 바꿈
+  const m = curModel();
+  if (m) S.cal.pts = [[C.fretU(fA), 0], [C.fretU(fA), 1], [C.fretU(fB), 0], [C.fretU(fB), 1]].map(([u, v]) => m.toImg(u, v));
+  S.cal.fA = fA; S.cal.fB = fB;
+  $('fALabel').textContent = $('fA').selectedOptions[0].textContent; $('fBLabel').textContent = $('fB').selectedOptions[0].textContent;
+  drawCalib();
 }
+$('fA').addEventListener('change', () => { if (S.cal) setRefFrets(+$('fA').value, S.cal.fB); });
+$('fB').addEventListener('change', () => { if (S.cal) setRefFrets(S.cal.fA, +$('fB').value); });
+function strInfo() {
+  const names = S.tuning.open.map(sName);
+  $('strInfo').textContent = `줄 순서: 화면 위쪽부터 ${(S.topIsLow ? names : names.slice().reverse()).join(' · ')}`;
+}
+$('btnFlipStr').addEventListener('click', () => { S.topIsLow = !S.topIsLow; strInfo(); drawCalib(); if (S.result) { applyVideoToNotes(); refret(); render(); } });
+const tipBoard = (m, x, y) => C.tipToBoard(m, x, y, S.tuning.open.length, S.topIsLow, S.margin);
+function curModel() { return S.cal ? C.neckModel(S.cal) : null; }
+
+// 추적 결과에서 시각 t의 모델 (가장 가까운 추적 프레임, 0.15초 이내)
+function trackAt(t) {
+  if (!S.vc || !S.vc.track) return null;
+  const tr = S.vc.track; let lo = 0, hi = tr.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (tr[mid].t <= t) lo = mid; else hi = mid; }
+  const a = tr[lo], b = tr[hi];
+  if (a.pts && b.pts && a.t <= t && b.t >= t && b.t - a.t < 0.4) {
+    const w = (t - a.t) / Math.max(1e-6, b.t - a.t);
+    return { pts: a.pts.map((p, i) => [p[0] + (b.pts[i][0] - p[0]) * w, p[1] + (b.pts[i][1] - p[1]) * w]), q: Math.min(a.q, b.q) };
+  }
+  const c = Math.abs(a.t - t) < Math.abs(b.t - t) ? a : b;
+  return c.pts && Math.abs(c.t - t) < 0.15 ? { pts: c.pts, q: c.q } : null;
+}
+function modelAt(t) { const r = trackAt(t); return r ? C.neckModel({ pts: r.pts, fA: 0, fB: 12 }) : null; }
+// 화면을 넘기면 추적된 넥 위치로 점을 옮겨 보여줌 (틀렸으면 바로 끌어서 고침)
+function followTrack() {
+  const r = trackAt(vid.currentTime); if (!r || !S.cal) return;
+  const m = C.neckModel({ pts: r.pts, fA: 0, fB: 12 }); if (!m) return;
+  S.cal.pts = [[C.fretU(S.cal.fA), 0], [C.fretU(S.cal.fA), 1], [C.fretU(S.cal.fB), 0], [C.fretU(S.cal.fB), 1]].map(([u, v]) => m.toImg(u, v));
+  S.calFromTrack = r.q;
+}
+
 let drag = null, dragXY = null;
 function drawCalib() {
   const r = cc.getBoundingClientRect(), dpr = devicePixelRatio || 1;
@@ -115,54 +155,52 @@ function drawCalib() {
   if (!S.cal) return;
   const W = cc.width, H = cc.height, m = curModel();
   const P = (u, v) => { const [x, y] = m.toImg(u, v); return [x * W, y * H]; };
+  const tracked = S.calFromTrack != null;
   if (m) {
-    const nStr = S.tuning.open.length, mg = 0.12;
-    // 지판 테두리
-    c.lineWidth = 1.5 * dpr; c.strokeStyle = 'rgba(142,168,255,.95)';
-    const u24 = C.fretU(22);
-    [[0, 0, u24, 0], [0, 1, u24, 1]].forEach(([u0, v0, u1, v1]) => { c.beginPath(); c.moveTo(...P(u0, v0)); for (let k = 1; k <= 20; k++) c.lineTo(...P(u0 + (u1 - u0) * k / 20, v0)); c.stroke(); });
-    // 프렛
-    for (let f = 0; f <= 22; f++) {
+    const nStr = S.tuning.open.length, u24 = C.fretU(21);
+    c.lineWidth = 1.5 * dpr; c.strokeStyle = tracked ? 'rgba(80,255,160,.95)' : 'rgba(142,168,255,.95)';
+    [0, 1].forEach(v => { c.beginPath(); c.moveTo(...P(0, v)); for (let k = 1; k <= 24; k++) c.lineTo(...P(u24 * k / 24, v)); c.stroke(); });
+    for (let f = 0; f <= 21; f++) {
       const u = C.fretU(f);
-      c.strokeStyle = f === S.cal.fA || f === S.cal.fB ? 'rgba(255,120,60,.95)' : 'rgba(255,214,0,.85)';
-      c.lineWidth = (f === 0 ? 2.5 : 1.3) * dpr;
+      c.strokeStyle = f === S.cal.fA || f === S.cal.fB ? 'rgba(255,120,60,.95)' : 'rgba(255,214,0,.8)';
+      c.lineWidth = (f === 0 ? 2.5 : 1.2) * dpr;
       c.beginPath(); c.moveTo(...P(u, 0)); c.lineTo(...P(u, 1)); c.stroke();
-      if ([3, 5, 7, 9, 12, 15, 17, 19, 21].includes(f)) {
-        const [x, y] = P((u + C.fretU(f - 1)) / 2, 0.5);
-        c.fillStyle = 'rgba(255,214,0,.95)'; c.font = `${11 * dpr}px IBM Plex Mono, monospace`; c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.beginPath(); c.arc(x, y, 3 * dpr, 0, 7); c.fill();
-      }
+      if ([3, 5, 7, 9, 12, 15, 17].includes(f)) { const [x, y] = P((u + C.fretU(f - 1)) / 2, 0.5); c.fillStyle = 'rgba(255,214,0,.95)'; c.beginPath(); c.arc(x, y, 2.6 * dpr, 0, 7); c.fill(); }
     }
-    // 줄
+    const vs = T.stringV(nStr, S.margin);
     for (let s = 0; s < nStr; s++) {
-      const v = mg + (1 - 2 * mg) * (topIsLow() ? s : nStr - 1 - s) / (nStr - 1);
-      c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 1 * dpr;
-      c.beginPath(); c.moveTo(...P(0, v)); c.lineTo(...P(u24, v)); c.stroke();
-      const [x, y] = P(-0.025, v); c.fillStyle = '#fff'; c.font = `600 ${11 * dpr}px IBM Plex Mono, monospace`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(sName(S.tuning.open[s]), x, y);
+      const v = vs[S.topIsLow ? s : nStr - 1 - s];
+      c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = 1 * dpr;
+      c.beginPath(); c.moveTo(...P(-0.01, v)); c.lineTo(...P(u24, v)); c.stroke();
+      // 줄 이름: 줄 간격에 맞춰 글자 크기를 줄이고 너트 바깥쪽에 표시
+      const [xa, ya] = P(0, vs[0]), [xb, yb] = P(0, vs[nStr - 1]);
+      const gapPx = Math.hypot(xb - xa, yb - ya) / (nStr - 1);
+      const fsz = Math.max(7 * dpr, Math.min(11 * dpr, gapPx * 0.85));
+      const [x0, y0] = P(0, v), [x1, y1] = P(0.02, v); const dl = Math.hypot(x1 - x0, y1 - y0) || 1;
+      const x = x0 - (x1 - x0) / dl * (fsz * 1.1 + 4 * dpr), y = y0 - (y1 - y0) / dl * (fsz * 1.1 + 4 * dpr);
+      c.fillStyle = 'rgba(0,0,0,.65)'; c.fillRect(x - fsz * 0.75, y - fsz * 0.6, fsz * 1.5, fsz * 1.2);
+      c.fillStyle = '#fff'; c.font = `600 ${fsz}px IBM Plex Mono, monospace`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(sName(S.tuning.open[s]), x, y);
     }
   }
-  // 손 인식 미리보기
   if (S.handsPreview && m) {
     S.handsPreview.forEach(h => {
       h.all.forEach(([x, y]) => { c.fillStyle = 'rgba(80,255,160,.7)'; c.beginPath(); c.arc(x * W, y * H, 2.5 * dpr, 0, 7); c.fill(); });
       h.tips.forEach(([x, y]) => {
-        const b = C.tipToBoard(m, x, y, S.tuning.open.length, topIsLow());
+        const b = tipBoard(m, x, y);
         c.fillStyle = '#50ffa0'; c.beginPath(); c.arc(x * W, y * H, 5 * dpr, 0, 7); c.fill();
         if (b.u > -0.03 && b.u < 0.75 && b.v > -0.4 && b.v < 1.4) {
           const fr = Math.max(0, Math.ceil(b.f - 0.15)), st = Math.round(Math.min(S.tuning.open.length - 1, Math.max(0, b.s)));
-          c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(x * W + 6 * dpr, y * H - 18 * dpr, 52 * dpr, 16 * dpr);
+          c.fillStyle = 'rgba(0,0,0,.7)'; c.fillRect(x * W + 6 * dpr, y * H - 18 * dpr, 56 * dpr, 16 * dpr);
           c.fillStyle = '#fff'; c.font = `${11 * dpr}px IBM Plex Mono, monospace`; c.textAlign = 'left'; c.textBaseline = 'middle';
           c.fillText(`${sName(S.tuning.open[st])}줄 ${fr}`, x * W + 9 * dpr, y * H - 10 * dpr);
         }
       });
     });
   }
-  // 점
   S.cal.pts.forEach(([x, y], i) => {
-    c.beginPath(); c.fillStyle = drag === i ? '#ff7a3c' : '#2f6bff'; c.strokeStyle = '#fff'; c.lineWidth = 2 * dpr;
+    c.beginPath(); c.fillStyle = drag === i ? '#ff7a3c' : (tracked ? 'rgba(47,107,255,.55)' : '#2f6bff'); c.strokeStyle = '#fff'; c.lineWidth = 2 * dpr;
     c.arc(x * W, y * H, 9 * dpr, 0, 7); c.fill(); c.stroke();
   });
-  // 돋보기
   if (drag != null && dragXY && vid.videoWidth) {
     const [x, y] = S.cal.pts[drag], R = 64 * dpr, Z = 3;
     let cx = x * W, cy = y * H - R - 34 * dpr; if (cy < R + 4) cy = y * H + R + 34 * dpr;
@@ -171,12 +209,11 @@ function drawCalib() {
     const sw = vid.videoWidth * (2 * R / W) / Z, sh = vid.videoHeight * (2 * R / H) / Z;
     try { c.drawImage(vid, x * vid.videoWidth - sw / 2, y * vid.videoHeight - sh / 2, sw, sh, cx - R, cy - R, 2 * R, 2 * R); } catch (e) { /* 프레임 없음 */ }
     if (m) {
-      // 돋보기 안에도 프렛·테두리 선 표시
       c.translate(cx - x * W * Z, cy - y * H * Z); c.scale(Z, Z);
       c.strokeStyle = 'rgba(255,214,0,.9)'; c.lineWidth = 1 * dpr / Z;
-      for (let f = 0; f <= 22; f++) { const u = C.fretU(f); c.beginPath(); c.moveTo(...P(u, 0)); c.lineTo(...P(u, 1)); c.stroke(); }
+      for (let f = 0; f <= 21; f++) { const u = C.fretU(f); c.beginPath(); c.moveTo(...P(u, 0)); c.lineTo(...P(u, 1)); c.stroke(); }
       c.strokeStyle = 'rgba(142,168,255,.95)';
-      [0, 1].forEach(v => { c.beginPath(); c.moveTo(...P(0, v)); c.lineTo(...P(C.fretU(22), v)); c.stroke(); });
+      [0, 1].forEach(v => { c.beginPath(); c.moveTo(...P(0, v)); c.lineTo(...P(C.fretU(21), v)); c.stroke(); });
       c.setTransform(1, 0, 0, 1, 0, 0);
     }
     c.restore();
@@ -189,43 +226,17 @@ cc.addEventListener('pointerdown', e => {
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
   let best = null, bd = 1e9;
   S.cal.pts.forEach(([px, py], i) => { const d = Math.hypot((px - x) * r.width, (py - y) * r.height); if (d < bd) { bd = d; best = i; } });
-  if (bd < 44) { drag = best; dragXY = [x, y]; cc.setPointerCapture(e.pointerId); e.preventDefault(); drawCalib(); }
+  if (bd < 44) { drag = best; dragXY = [x, y]; S.calFromTrack = null; cc.setPointerCapture(e.pointerId); e.preventDefault(); drawCalib(); }
 });
 cc.addEventListener('pointermove', e => {
   if (drag == null) return; const r = cc.getBoundingClientRect();
   const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-  // 손가락으로 가리지 않도록 움직인 만큼만 이동
   const [ox, oy] = dragXY; dragXY = [x, y];
   const p = S.cal.pts[drag]; p[0] = Math.min(1, Math.max(0, p[0] + (x - ox))); p[1] = Math.min(1, Math.max(0, p[1] + (y - oy)));
   drawCalib();
 });
-['pointerup', 'pointercancel'].forEach(ev => cc.addEventListener(ev, () => { drag = null; dragXY = null; drawCalib(); }));
-new ResizeObserver(() => { if (!$('cardVideo').hidden) drawCalib(); }).observe($('videoBox'));
-
-function renderKeys() {
-  const box = $('keys'); box.innerHTML = '';
-  S.keys.sort((a, b) => a.t - b.t).forEach((k, i) => {
-    const b = document.createElement('button'); b.type = 'button';
-    b.textContent = fmtTime1(k.t) + ' ✕'; b.title = '이 장면으로 이동 (길게 누르거나 ✕로 삭제)';
-    if (Math.abs(k.t - vid.currentTime) < 0.05) b.classList.add('cur');
-    b.addEventListener('click', ev => {
-      const rr = b.getBoundingClientRect();
-      if (ev.clientX > rr.right - 22) { S.keys.splice(i, 1); renderKeys(); updCalibState(); return; }
-      S.cal = { pts: k.pts.map(p => p.slice()), fA: k.fA, fB: k.fB }; $('fA').value = k.fA; $('fB').value = k.fB; vid.currentTime = k.t;
-    });
-    box.appendChild(b);
-  });
-  updCalibState();
-}
-function updCalibState() { $('calibState').textContent = S.keys.length ? `${S.keys.length}개 장면 저장됨` : '아직 저장 안 함'; }
-$('btnKeySave').addEventListener('click', () => {
-  if (!S.cal || !curModel()) return toast('점 위치가 이상합니다. 네 점이 사각형을 이루게 놓아 주세요');
-  const t = vid.currentTime;
-  const ex = S.keys.find(k => Math.abs(k.t - t) < 0.05);
-  const k = { t, pts: S.cal.pts.map(p => p.slice()), fA: S.cal.fA, fB: S.cal.fB };
-  if (ex) Object.assign(ex, k); else S.keys.push(k);
-  renderKeys(); toast(`${fmtTime1(t)} 장면 기준을 저장했습니다`);
-});
+['pointerup', 'pointercancel'].forEach(ev => cc.addEventListener(ev, () => { if (drag != null) { drag = null; dragXY = null; drawCalib(); } }));
+new ResizeObserver(() => { if (!$('cardVideo').hidden) { drawCalib(); drawTrackBar(); } }).observe($('videoBox'));
 
 // ------------------------------------------------------------------ 영상 프레임
 function seekTo(v, t) {
@@ -238,21 +249,200 @@ function seekTo(v, t) {
     setTimeout(fin, 2000);
   });
 }
-let frameCv = null;
+const frameCvs = {};
 function grabFrame(maxW = 960) {
   const w = Math.min(maxW, vid.videoWidth), h = Math.round(w * vid.videoHeight / vid.videoWidth);
-  if (!frameCv) frameCv = document.createElement('canvas');
-  frameCv.width = w; frameCv.height = h;
-  frameCv.getContext('2d', { willReadFrequently: true }).drawImage(vid, 0, 0, w, h);
-  return frameCv;
+  const cv = frameCvs[w] || (frameCvs[w] = document.createElement('canvas'));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  cv.getContext('2d', { willReadFrequently: true }).drawImage(vid, 0, 0, w, h);
+  return cv;
+}
+function grabGray() {
+  const cv = grabFrame(TW), w = cv.width, h = cv.height;
+  return { gray: T.toGray(cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data, w, h), w, h };
 }
 async function primeVideo() { try { vid.muted = true; await vid.play(); vid.pause(); } catch (e) { /* 사용자 동작 필요 */ } }
+const handMasks = hands => hands.map(h => {
+  let x0 = 1, x1 = 0, y0 = 1, y1 = 0; h.all.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: Math.max(0.02, (x1 - x0) * 0.62), ry: Math.max(0.02, (y1 - y0) * 0.62) };
+});
+
+// 자동 맞춤: 지금 장면에서 프렛 선·테두리·줄에 맞게 점을 다듬고 줄 간격을 찾음
+async function autoFitHere(quiet) {
+  if (!S.cal || !curModel()) { if (!quiet) toast('점 네 개가 사각형을 이루게 놓아 주세요'); return false; }
+  await primeVideo();
+  const g = grabGray(), L = T.pyramid(g.gray, g.w, g.h, 1)[0];
+  let masks = [];
+  try { if (S.handsReady) masks = handMasks(AI.detectHands(grabFrame(640))); } catch (e) { /* 손 없이 진행 */ }
+  const nStr = S.tuning.open.length;
+  const corners = T.cornersOf(S.cal);
+  let pts = T.snap(L, corners, masks, { maxShift: 6 }).pts;
+  const fs = T.fitStrings(L, pts, masks, nStr);
+  if (fs) { S.margin = Math.min(0.25, Math.max(0.04, fs.margin)); pts = T.snap(L, fs.pts, masks, { maxShift: 3, nStr, margin: S.margin }).pts; }
+  const m = C.neckModel({ pts, fA: 0, fB: 12 });
+  S.cal.pts = [[C.fretU(S.cal.fA), 0], [C.fretU(S.cal.fA), 1], [C.fretU(S.cal.fB), 0], [C.fretU(S.cal.fB), 1]].map(([u, v]) => m.toImg(u, v));
+  S.calFromTrack = null;
+  if (fs && !S.dirFromHand && fs.thickRatio && (fs.thickRatio > 1.25 || fs.thickRatio < 0.8)) { S.topIsLow = fs.topThicker; strInfo(); }
+  drawCalib();
+  if (!quiet) toast(fs ? '프렛과 줄에 맞췄습니다. 흰 줄 선이 실제 줄과 겹치는지 확인하세요' : '프렛 선에 맞췄습니다. 줄이 잘 안 보여 줄 간격은 기본값을 씁니다', 4500);
+  return true;
+}
+$('btnSnap').addEventListener('click', async () => { const b = $('btnSnap'); b.disabled = true; try { await autoFitHere(false); } catch (e) { toast('자동 맞춤 실패: ' + e.message); } b.disabled = false; });
+
+// 기준 장면
+function renderKeys() {
+  const box = $('keys'); box.innerHTML = '';
+  S.keys.sort((a, b) => a.t - b.t).forEach((k, i) => {
+    const wrap = document.createElement('span'); wrap.className = 'keychip';
+    const go = document.createElement('button'); go.type = 'button'; go.textContent = '기준 ' + fmtTime1(k.t);
+    if (Math.abs(k.t - vid.currentTime) < 0.05) go.classList.add('cur');
+    go.addEventListener('click', () => { S.cal = { pts: k.pts.map(p => p.slice()), fA: k.fA, fB: k.fB }; $('fA').value = k.fA; $('fB').value = k.fB; S.calFromTrack = null; scanning = true; seekTo(vid, k.t).then(() => { scanning = false; $('vScrub').value = vid.currentTime; drawCalib(); renderKeys(); }); });
+    const del = document.createElement('button'); del.type = 'button'; del.textContent = '✕'; del.setAttribute('aria-label', fmtTime1(k.t) + ' 기준 지우기');
+    del.addEventListener('click', () => { S.keys.splice(i, 1); renderKeys(); });
+    wrap.append(go, del); box.appendChild(wrap);
+  });
+  updCalibState();
+}
+function updCalibState() {
+  const tr = S.vc && S.vc.track;
+  if (tr) { const ok = tr.filter(r => r.pts).length; $('calibState').textContent = `추적 ${Math.round(ok / tr.length * 100)}% · 기준 ${S.keys.length}개`; }
+  else $('calibState').textContent = S.keys.length ? `기준 ${S.keys.length}개` : '아직 안 맞춤';
+}
+async function addKeyHere(quiet) {
+  if (!S.cal || !curModel()) { toast('점 위치가 이상합니다. 네 점이 사각형을 이루게 놓아 주세요'); return false; }
+  const t = vid.currentTime;
+  const ex = S.keys.find(k => Math.abs(k.t - t) < 0.05);
+  const k = { t, pts: S.cal.pts.map(p => p.slice()), fA: S.cal.fA, fB: S.cal.fB };
+  if (ex) Object.assign(ex, k); else S.keys.push(k);
+  renderKeys(); if (!quiet) toast(`${fmtTime1(t)} 장면을 기준으로 추가했습니다. 다시 추적하면 반영됩니다`, 3500);
+  return true;
+}
+$('btnKeySave').addEventListener('click', async () => { await autoFitHere(true).catch(() => {}); addKeyHere(false); });
+
+// ------------------------------------------------------------------ 영상 훑기 (프레임 저장 + 손 인식) → 넥 추적
+async function scanVideo(t0, t1, prog) {
+  if (S.vc && S.vc.t0 <= t0 + 0.01 && S.vc.t1 >= t1 - 0.01 && S.vc.frames.length) return S.vc;
+  const dur = Math.max(0.5, t1 - t0);
+  const fps = Math.max(4, Math.min(8, 1500 / dur));
+  let hands = true;
+  try { await AI.loadHands(); S.handsReady = true; } catch (e) { hands = false; AI.log.push('손 인식 AI 없이 넥만 추적합니다: ' + e.message); }
+  const frames = [];
+  const take = () => {
+    const g = grabGray();
+    let hs = [];
+    if (hands) { try { hs = AI.detectHands(grabFrame(640)); } catch (e) { /* 이 프레임 건너뜀 */ } }
+    frames.push({ t: vid.currentTime, gray: g.gray, w: g.w, h: g.h, hands: hs, masks: handMasks(hs) });
+  };
+  scanning = true;
+  try {
+    if (vid.requestVideoFrameCallback) {
+      // 영상을 소리 없이 재생하면서 프레임을 받음 (탐색보다 빠름)
+      await seekTo(vid, t0);
+      vid.muted = true;
+      let last = -1, procMs = 30, rate = 1;
+      await new Promise((resolve, reject) => {
+        let stopped = false;
+        const finish = () => { if (stopped) return; stopped = true; vid.pause(); resolve(); };
+        const cb = (now, meta) => {
+          if (stopped) return;
+          const t = meta.mediaTime;
+          if (t >= t1 || vid.ended) return finish();
+          if (t - last >= 1 / fps - 0.01) {
+            const a = performance.now(); take(); frames[frames.length - 1].t = t; procMs = 0.8 * procMs + 0.2 * (performance.now() - a);
+            last = t;
+            const want = Math.max(0.25, Math.min(2, 0.85 / (fps * procMs / 1000)));
+            if (Math.abs(want - rate) > 0.1) { rate = want; vid.playbackRate = rate; }
+            prog && prog((t - t0) / dur);
+          }
+          vid.requestVideoFrameCallback(cb);
+        };
+        vid.addEventListener('ended', finish, { once: true });
+        vid.requestVideoFrameCallback(cb);
+        vid.playbackRate = rate;
+        vid.play().catch(err => { stopped = true; reject(err); });
+        setTimeout(finish, (dur / 0.2 + 30) * 1000);
+      });
+      vid.playbackRate = 1;
+    } else {
+      for (let t = t0; t < t1; t += 1 / fps) { await seekTo(vid, t); take(); prog && prog((t - t0) / dur); }
+    }
+  } finally { scanning = false; }
+  S.vc = { t0, t1, frames, track: null };
+  AI.log.push(`영상 훑기: ${frames.length}프레임 (${fps.toFixed(1)}장/초), 손 인식 ${hands ? '사용' : '없음'}`);
+  return S.vc;
+}
+async function runTracking(prog) {
+  if (!S.vc) return;
+  const anchors = S.keys.length ? S.keys : (S.cal ? [{ t: vid.currentTime, ...S.cal }] : []);
+  if (!anchors.length) throw new Error('먼저 넥 위치를 맞춰 주세요');
+  if (!S.keys.length) S.keys.push({ t: vid.currentTime, pts: S.cal.pts.map(p => p.slice()), fA: S.cal.fA, fB: S.cal.fB });
+  S.vc.track = await T.trackAll(S.vc.frames, anchors, { nStr: S.tuning.open.length, margin: S.margin }, prog);
+  // 줄 방향: 왼손 손바닥이 놓인 쪽이 가는 줄
+  let up = 0, down = 0;
+  S.vc.frames.forEach((f, k) => {
+    const tr = S.vc.track[k]; if (!tr.pts || !f.hands.length) return;
+    const m = C.neckModel({ pts: tr.pts, fA: 0, fB: 12 });
+    const on = f.hands.map(h => ({ h, mu: h.tips.map(([x, y]) => m.toBoard(x, y)).filter(([u, v]) => u > -0.03 && u < 0.73 && v > -0.35 && v < 1.35) })).filter(o => o.mu.length >= 2)
+      .sort((a, b) => a.mu.reduce((s, p) => s + p[0], 0) / a.mu.length - b.mu.reduce((s, p) => s + p[0], 0) / b.mu.length);
+    if (!on.length) return;
+    const r = T.lowOnTopFromHand(m, on[0].h); if (r === true) up++; else if (r === false) down++;
+  });
+  if (up + down >= 5 && Math.max(up, down) >= 0.7 * (up + down)) {
+    const v = up > down; S.dirFromHand = true;
+    if (v !== S.topIsLow) { S.topIsLow = v; toast('손 위치를 보고 줄 순서를 바꿨습니다. 맞는지 확인하세요', 4500); }
+    strInfo();
+  }
+  updCalibState(); drawTrackBar(); followTrack(); drawCalib();
+}
+function drawTrackBar() {
+  const cv = $('trackBar'); const tr = S.vc && S.vc.track;
+  cv.hidden = !tr; if (!tr || !vid.duration) return;
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.round(18 * dpr);
+  const c = cv.getContext('2d'), W = cv.width, H = cv.height, D = vid.duration;
+  const cs = getComputedStyle(document.documentElement);
+  c.fillStyle = cs.getPropertyValue('--chip'); c.fillRect(0, 0, W, H);
+  tr.forEach((p, i) => {
+    const x0 = p.t / D * W, x1 = ((tr[i + 1] ? tr[i + 1].t : p.t + 0.2) / D) * W;
+    c.fillStyle = !p.pts ? '#d64545' : p.q < 0.45 ? '#e3a64a' : '#3aa864';
+    c.fillRect(x0, 3 * dpr, Math.max(1, x1 - x0 + 0.5), H - 6 * dpr);
+  });
+  c.fillStyle = cs.getPropertyValue('--accent');
+  S.keys.forEach(k => { const x = k.t / D * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x - 4 * dpr, 0); c.lineTo(x, 6 * dpr); c.lineTo(x + 4 * dpr, 0); c.fill(); });
+  c.fillStyle = cs.getPropertyValue('--ink'); c.fillRect(vid.currentTime / D * W - dpr, 0, 2 * dpr, H);
+}
+$('trackBar').addEventListener('pointerdown', e => { const r = e.currentTarget.getBoundingClientRect(); vid.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (vid.duration || 0); });
+async function trackFlow() {
+  const b = $('btnTrack'); b.disabled = true;
+  $('trackProg').hidden = false;
+  const bar = $('trackBarFill'), msg = $('trackMsg');
+  try {
+    await primeVideo();
+    if (!S.keys.length) { await autoFitHere(true); await addKeyHere(true); }
+    const t0 = Math.max(0, +$('rStart').value || 0), t1v = +$('rEnd').value || 0, t1 = t1v > t0 ? Math.min(vid.duration, t1v) : vid.duration;
+    const here = vid.currentTime;
+    if (!S.vc || !(S.vc.t0 <= t0 + 0.01 && S.vc.t1 >= t1 - 0.01)) {
+      msg.textContent = '영상을 훑는 중… (영상 길이만큼 걸릴 수 있습니다)';
+      await scanVideo(t0, t1, f => { bar.style.width = (f * 70) + '%'; });
+    }
+    msg.textContent = '넥을 따라가는 중…';
+    await runTracking(f => { bar.style.width = (70 + f * 30) + '%'; });
+    bar.style.width = '100%';
+    const tr = S.vc.track, lost = tr.filter(r => !r.pts).length;
+    msg.textContent = lost ? `추적 완료 — ${Math.round(lost / tr.length * 100)}% 구간을 놓쳤습니다(빨간 부분). 그 장면에서 점을 맞추고 '이 장면 기준 추가' 후 다시 추적하세요.` : '추적 완료 — 막대를 눌러 여러 장면에서 초록 선이 넥에 붙어 있는지 확인하세요.';
+    b.textContent = '다시 추적';
+    scanning = true; await seekTo(vid, here); scanning = false; followTrack(); drawCalib(); drawTrackBar();
+    if (S.result) { applyVideoToNotes(); refret(); render(); toast('넥 추적 결과를 악보 운지에 반영했습니다'); }
+  } catch (e) { msg.textContent = '추적하지 못했습니다: ' + e.message; }
+  logUI(); b.disabled = false;
+}
+$('btnTrack').addEventListener('click', trackFlow);
 
 $('btnHandTest').addEventListener('click', async () => {
   const b = $('btnHandTest'); b.disabled = true; b.textContent = '손 인식 준비 중…';
   try {
     await primeVideo();
-    await AI.loadHands();
+    await AI.loadHands(); S.handsReady = true;
     S.handsPreview = AI.detectHands(grabFrame());
     drawCalib();
     toast(S.handsPreview.length ? `손 ${S.handsPreview.length}개를 찾았습니다. 손가락 끝의 줄·프렛 표시가 맞는지 확인하세요` : '이 장면에서 손을 찾지 못했습니다', 4200);
@@ -326,12 +516,21 @@ $('btnAnalyze').addEventListener('click', async () => {
     S.result = res; S.offset = t0; S.bpm = res.bpm; S.firstBeat = res.firstBeat;
     $('bpm').placeholder = res.estBpm.toFixed(1);
 
-    // 3) 영상: 손 위치
+    // 3) 영상: 넥 추적 + 손 위치
     if (S.isVideo && $('useVideo').checked) {
       setStage('video', 0);
-      const keys = S.keys.length ? S.keys : (S.cal ? [{ t: vid.currentTime, ...S.cal }] : []);
-      if (!keys.length) { stageSkip.add('video'); toast('넥 위치를 맞추지 않아 손 위치 분석을 건너뜁니다'); }
-      else await videoPass(res.all, keys, f => setStage('video', f));
+      try {
+        const vt1 = t1v > t0 ? Math.min(vid.duration, t1v) : vid.duration;
+        if (!S.keys.length && S.cal) { await autoFitHere(true); await addKeyHere(true); }
+        if (!S.keys.length) throw new Error('넥 위치를 맞추지 않았습니다');
+        if (!S.vc || !S.vc.track || !(S.vc.t0 <= t0 + 0.01 && S.vc.t1 >= vt1 - 0.01)) {
+          await scanVideo(t0, vt1, f => setStage('video', f * 0.75));
+          await runTracking(f => setStage('video', 0.75 + 0.25 * f));
+          $('btnTrack').textContent = '다시 추적';
+        }
+        const r = applyVideoToNotes();
+        if (!r.used) toast('영상에서 지판 위 손을 찾지 못했습니다. 넥 맞추기와 줄 순서를 확인해 보세요.', 5000);
+      } catch (e) { stageSkip.add('video'); toast('손 위치 분석을 건너뜁니다: ' + e.message, 5000); }
     } else stageSkip.add('video');
 
     setStage('frets', 0);
@@ -376,75 +575,32 @@ function refret() {
 }
 
 // ------------------------------------------------------------------ 영상: 손가락 끝 → 줄·프렛
-async function videoPass(notes, keys, prog) {
-  const nStr = S.tuning.open.length, tl = topIsLow();
-  const pitched = notes.filter(n => n.midi != null);
-  let useMP = true;
-  try { await AI.loadHands(); } catch (e) { useMP = false; toast('손 인식 AI를 불러오지 못해 지판 가림 분석으로 대신합니다', 5000); }
-  logUI();
-  let times = [...new Set(pitched.map(n => Math.round((n.start + 0.035) * 20) / 20))].sort((a, b) => a - b);
-  if (times.length > 900) { const st = times.length / 900; times = Array.from({ length: 900 }, (_, i) => times[Math.floor(i * st)]); }
-  const byT = new Map();
-  if (useMP) {
-    for (let k = 0; k < times.length; k++) {
-      const t = times[k];
-      await seekTo(vid, t);
-      const model = C.neckAt(keys, t); if (!model) continue;
-      let hands = [];
-      try { hands = AI.detectHands(grabFrame(640)); } catch (e) { /* 프레임 오류 */ }
-      const on = hands.map(h => {
-        const tips = h.tips.map(([x, y]) => C.tipToBoard(model, x, y, nStr, tl));
-        const inside = tips.filter(b => b.u > -0.03 && b.u < 0.73 && b.v > -0.35 && b.v < 1.35);
-        return { inside, mu: inside.length ? inside.reduce((a, b) => a + b.u, 0) / inside.length : 9 };
-      }).filter(h => h.inside.length >= 2).sort((a, b) => a.mu - b.mu);
-      if (on.length) byT.set(t, { tips: on[0].inside.map(b => ({ f: b.f, s: b.s })), tap: on[1] ? on[1].inside.map(b => ({ f: b.f, s: b.s })) : null });
-      if (k % 4 === 0) prog(k / times.length);
-    }
-  } else {
-    await occlusionPass(times, keys, byT, prog);
-  }
-  let used = 0;
-  for (const n of pitched) {
-    const h = byT.get(Math.round((n.start + 0.035) * 20) / 20);
-    if (h) { n.hand = h; used++; }
-  }
-  prog(1);
-  AI.log.push(`손 위치: 음 ${pitched.length}개 중 ${used}개에 적용`); logUI();
-  if (!used) toast('영상에서 지판 위 손을 찾지 못했습니다. 넥 보정과 화면 방향을 확인해 보세요.', 5000);
+function handAtTime(t) {
+  const fr = S.vc && S.vc.frames; if (!fr || !fr.length) return null;
+  let lo = 0, hi = fr.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (fr[mid].t <= t) lo = mid; else hi = mid; }
+  const f = Math.abs(fr[lo].t - t) <= Math.abs(fr[hi].t - t) ? fr[lo] : fr[hi];
+  if (Math.abs(f.t - t) > 0.13 || !f.hands.length) return null;
+  const m = modelAt(f.t); if (!m) return null;
+  const on = f.hands.map(h => {
+    const tips = h.tips.map(([x, y]) => tipBoard(m, x, y));
+    const inside = tips.filter(b => b.u > -0.03 && b.u < 0.73 && b.v > -0.35 && b.v < 1.35);
+    return { inside, mu: inside.length ? inside.reduce((a, b) => a + b.u, 0) / inside.length : 9 };
+  }).filter(h => h.inside.length >= 2).sort((a, b) => a.mu - b.mu);
+  if (!on.length) return null;
+  return { tips: on[0].inside.map(b => ({ f: b.f, s: b.s })), tap: on[1] ? on[1].inside.map(b => ({ f: b.f, s: b.s })) : null };
 }
-// 손 인식 AI를 못 쓸 때: 지판이 가려진 구간(손 위치)을 프렛 범위로 사용
-async function occlusionPass(times, keys, byT, prog) {
-  const W = 320, H = Math.round(W * vid.videoHeight / vid.videoWidth);
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const cx = cv.getContext('2d', { willReadFrequently: true });
-  const POS = 44, AC = 7, samples = [];
-  for (let k = 0; k < times.length; k++) {
-    await seekTo(vid, times[k]);
-    const m = C.neckAt(keys, times[k]); if (!m) { samples.push(null); continue; }
-    cx.drawImage(vid, 0, 0, W, H); const img = cx.getImageData(0, 0, W, H).data;
-    const row = new Uint8Array(POS * AC * 3);
-    for (let p = 0; p < POS; p++) for (let a = 0; a < AC; a++) {
-      const [x, y] = m.toImg(C.fretU(p * 0.5 + 0.25), 0.1 + 0.8 * a / (AC - 1));
-      const px = Math.min(W - 1, Math.max(0, Math.round(x * W))), py = Math.min(H - 1, Math.max(0, Math.round(y * H))), o = (py * W + px) * 4, d = (p * AC + a) * 3;
-      row[d] = img[o]; row[d + 1] = img[o + 1]; row[d + 2] = img[o + 2];
-    }
-    samples.push(row);
-    if (k % 5 === 0) prog(k / times.length);
-  }
-  const valid = samples.filter(Boolean); if (!valid.length) return;
-  const L = POS * AC * 3, base = new Float32Array(L);
-  for (let j = 0; j < L; j++) { const a = valid.map(r => r[j]).sort((x, y) => x - y); base[j] = a[a.length >> 1]; }
-  samples.forEach((r, k) => {
-    if (!r) return;
-    const occ = [];
-    for (let p = 0; p < POS; p++) { let c = 0; for (let a = 0; a < AC; a++) { const d = (p * AC + a) * 3; if (Math.hypot(r[d] - base[d], r[d + 1] - base[d + 1], r[d + 2] - base[d + 2]) > 42) c++; } occ.push(c / AC); }
-    const hot = occ.map((v, p) => v >= 0.4 ? p : -1).filter(p => p >= 0);
-    if (hot.length < 2) return;
-    const lo = hot[0] * 0.5, hi = hot[hot.length - 1] * 0.5;
-    if (hi - lo > 8) return;
-    const tips = []; for (let f = lo; f <= hi + 0.5; f += 1) tips.push({ f: f + 0.6, s: (S.tuning.open.length - 1) / 2 });
-    byT.set(times[k], { tips, tap: null, weak: true });
-  });
+function applyVideoToNotes() {
+  let used = 0, total = 0;
+  const lists = [S.result ? S.result.all : [], S.notes];
+  lists.forEach((list, li) => list.forEach(n => {
+    if (n.midi == null) return;
+    const h = $('useVideo').checked ? handAtTime(n.start + 0.035) : null;
+    n.hand = h || null;
+    if (li === 0) { total++; if (h) used++; }
+  }));
+  AI.log.push(`손 위치: 음 ${total}개 중 ${used}개에 적용`); logUI();
+  return { used, total };
 }
 
 // ------------------------------------------------------------------ 악보 그리기 (연필로 쓴 종이)
@@ -775,8 +931,9 @@ JSON만 반환: {"found": true|false, "nut": {"top": {"x":..,"y":..}, "bottom": 
     if (ans && ans.found && ans.nut && ans.fret && ok(ans.nut.top) && ok(ans.nut.bottom) && ok(ans.fret.top) && ok(ans.fret.bottom) && [5, 7, 9, 12, 15, 17].includes(ans.fret.number)) {
       S.cal = { pts: [[ans.nut.top.x, ans.nut.top.y], [ans.nut.bottom.x, ans.nut.bottom.y], [ans.fret.top.x, ans.fret.top.y], [ans.fret.bottom.x, ans.fret.bottom.y]], fA: 0, fB: ans.fret.number };
       $('fA').value = '0'; $('fB').value = String(ans.fret.number);
-      if (typeof ans.lowStringOnTop === 'boolean') $('topIsLow').checked = ans.lowStringOnTop;
-      drawCalib(); toast('넥 위치를 잡았습니다. 노란 프렛 선이 실제 프렛과 겹치는지 확인하고 저장하세요', 5000);
+      if (typeof ans.lowStringOnTop === 'boolean') { S.topIsLow = ans.lowStringOnTop; strInfo(); }
+      S.calFromTrack = null;
+      await autoFitHere(true).catch(() => {}); toast('넥 위치를 잡았습니다. 노란 프렛 선이 실제 프렛과 겹치는지 확인하세요', 5000);
     } else toast('이 장면에서는 넥을 찾지 못했습니다. 너트가 보이는 다른 장면에서 다시 해 보세요', 5000);
   } catch (e) { toast(e.message, 6000); }
   b.disabled = false; b.textContent = 'Gemini로 넥 찾기';
@@ -983,14 +1140,19 @@ function textTab() {
   }
   return lines.join('\n');
 }
-$('btnSave').addEventListener('click', () => saveFile(safeName() + '.json', new Blob([JSON.stringify({ v: 2, title: $('title').value, tuning: S.tuning.id, bpm: S.bpm, beats: S.beats, origin: S.origin, six: S.six, keys: S.keys, notes: S.notes.map(n => { const { hand, ...rest } = n; return rest; }) })], { type: 'application/json' })));
+$('btnSave').addEventListener('click', () => saveFile(safeName() + '.json', new Blob([JSON.stringify({ v: 2, title: $('title').value, tuning: S.tuning.id, bpm: S.bpm, beats: S.beats, origin: S.origin, six: S.six, keys: S.keys, margin: S.margin, topIsLow: S.topIsLow, notes: S.notes.map(n => { const { hand, ...rest } = n; return rest; }) })], { type: 'application/json' })));
+$('btnToLib').addEventListener('click', () => {
+  if (S.example) return toast('먼저 파일을 분석하거나 작업을 불러오세요');
+  const notes = S.notes.map(n => ({ slot: n.slot, len: n.len || 1, string: n.string, fret: n.fret, midi: n.midi, tech: n.tech || null, dead: !!n.dead, ghost: !!n.ghost, harm: !!n.harm, vib: !!n.vib, bend: n.bend || 0, release: !!n.release, slideIn: n.slideIn || null, slideOut: n.slideOut || null, slap: !!n.slap, pop: !!n.pop }));
+  window.dispatchEvent(new CustomEvent('bt:totab', { detail: { title: $('title').value, tuning: S.tuning.id, bpm: S.bpm, beats: S.beats, notes } }));
+});
 $('loadJson').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   try {
     const d = JSON.parse(await f.text());
     S.tuning = TUNINGS.find(t => t.id === d.tuning) || TUNINGS[0]; $('tuning').value = S.tuning.id;
     S.bpm = d.bpm; S.beats = d.beats || 4; $('meter').value = S.beats; S.origin = d.origin || 0; S.six = d.six || 60 / S.bpm / 4;
-    S.notes = d.notes.map(n => ({ ...n, id: uid++ })); $('title').value = d.title || ''; S.keys = d.keys || [];
+    S.notes = d.notes.map(n => ({ ...n, id: uid++ })); $('title').value = d.title || ''; S.keys = d.keys || []; if (d.margin) S.margin = d.margin; if (typeof d.topIsLow === 'boolean') S.topIsLow = d.topIsLow; strInfo();
     S.example = false; $('exBadge').hidden = true; S.undo = []; renderKeys(); render(); toast('작업을 불러왔습니다');
   } catch (err) { toast('작업 파일을 읽지 못했습니다'); }
   e.target.value = '';
@@ -998,6 +1160,7 @@ $('loadJson').addEventListener('change', async e => {
 
 // ------------------------------------------------------------------ 시작
 loadExample();
+strInfo();
 render();
 if (document.fonts) document.fonts.ready.then(render);
 window.__bt = { S, C };

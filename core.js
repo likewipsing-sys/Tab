@@ -901,7 +901,7 @@
         const lo = n.hint.lo - 1, hi = n.hint.hi + 1;
         const d = f < lo ? lo - f : f > hi ? f - hi : 0;
         c += 1.2 * d * (n.hint.w || 1);
-      } else if (n.hint && f === 0) c += 0.3;
+      } else if (n.hint && f === 0) c += (n.hint.lo >= 3 ? 3 : 0.3);
       return c;
     };
     const trans = (B, [sa, fa], [sb, fb]) => {
