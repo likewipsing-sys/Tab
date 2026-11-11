@@ -12,11 +12,23 @@ function pencil(c, x0, y0, x1, y1, seed, wob) {
 
 export class TabView {
   constructor(box, opts = {}) {
-    this.box = box; this.tab = null; this.open = [28, 33, 38, 43]; this.play = null; this.loop = null; this.hits = []; this.onBar = opts.onBar || null;
+    this.box = box; this.tab = null; this.open = [28, 33, 38, 43]; this.play = null; this.loop = null; this.hits = []; this.onBar = opts.onBar || null; this.onCell = opts.onCell || null; this.cursor = null;
     new ResizeObserver(() => { clearTimeout(this._t); this._t = setTimeout(() => this.render(), 60); }).observe(box);
   }
   set(tab, open) { this.tab = tab; this.open = open; this.play = null; this.render(); }
   setLoop(l) { this.loop = l; this.render(); }
+  /** 편집 커서 {slot, string} 또는 null */
+  setCursor(c) {
+    const prev = this.sysOf(this.cursor && this.cursor.slot), now = this.sysOf(c && c.slot);
+    this.cursor = c;
+    [prev, now].filter((v, i, a) => v != null && a.indexOf(v) === i).forEach(i => this.drawOne(i));
+    if (now != null) {
+      const cv = this.box.children[now]; if (!cv) return;
+      const r = cv.getBoundingClientRect(), vh = window.innerHeight, keep = this.safeBottom ? this.safeBottom() : 120;
+      if (r.top < 70) window.scrollBy({ top: r.top - 90, behavior: 'smooth' });
+      else if (r.bottom > vh - keep) window.scrollBy({ top: r.bottom - (vh - keep) + 16, behavior: 'smooth' });
+    }
+  }
   setPlay(slot) {
     if (slot === this.play) return;
     const prevSys = this.sysOf(this.play), nowSys = this.sysOf(slot);
@@ -60,13 +72,21 @@ export class TabView {
     cv.width = Math.round(cssW * dpr); cv.height = Math.round(m.h * dpr);
     const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.fillStyle = '#fafbfd'; c.fillRect(0, 0, cssW, m.h);
-    this.hits[i] = drawSystem(c, this.layout.systems[i], this.tab, this.open, { x: 0, y: 0, w: cssW, spb: this.layout.spb, play: this.play, loop: this.loop, sysIndex: i }, m);
+    this.hits[i] = drawSystem(c, this.layout.systems[i], this.tab, this.open, { x: 0, y: 0, w: cssW, spb: this.layout.spb, play: this.play, loop: this.loop, sysIndex: i, cursor: this.cursor }, m);
   }
   tap(e) {
     const cv = e.currentTarget, i = +cv.dataset.i, r = cv.getBoundingClientRect(), H = this.hits[i]; if (!H) return;
-    const x = e.clientX - r.left; if (x < H.x0) return;
+    const x = e.clientX - r.left, y = e.clientY - r.top; if (x < H.x0) return;
     const bar = H.b0 + Math.floor((x - H.x0) / H.barW);
-    if (bar < H.b1 && this.onBar) this.onBar(bar);
+    if (bar >= H.b1) return;
+    if (this.cursor && this.onCell) {
+      const nStr = this.open.length, spb = this.layout.spb;
+      const slot = Math.max(H.b0 * spb, Math.min(H.b1 * spb - 1, H.b0 * spb + Math.floor((x - H.x0) / H.slotW)));
+      const string = Math.max(0, Math.min(nStr - 1, nStr - 1 - Math.round((y - H.top) / H.gap)));
+      this.onCell({ slot, string });
+      return;
+    }
+    if (this.onBar) this.onBar(bar);
   }
   /** 인쇄용: 시스템 하나를 주어진 캔버스에 그림 */
   drawTo(c, sysIndex, x, y, w) {
@@ -77,7 +97,7 @@ export class TabView {
 }
 
 export function drawSystem(c, sys, tab, open, o, m) {
-  const { x, y, w, spb, play, loop, sysIndex } = o, nStr = open.length, k = m.k;
+  const { x, y, w, spb, play, loop, sysIndex, cursor } = o, nStr = open.length, k = m.k;
   const nBars = sys.b1 - sys.b0, barW = (w - m.x0 - 8 * k) / nBars, slotW = barW / spb;
   const top = y + m.top, lineY = s => top + (nStr - 1 - s) * m.gap, bottom = lineY(0);
   const notes = tab.notes.filter(n => n.slot >= sys.b0 * spb && n.slot < sys.b1 * spb);
@@ -170,11 +190,27 @@ export function drawSystem(c, sys, tab, open, o, m) {
       for (let f = 0; f < flags; f++) { c.beginPath(); c.moveTo(xx, stemBot - f * 6 * k); c.quadraticCurveTo(xx + 9 * k, stemBot - f * 6 * k - 6 * k, xx + 7 * k, stemBot - f * 6 * k - 13 * k); c.stroke(); }
     }
   }
+  // 편집 커서
+  if (cursor) {
+    // 박 위치 점 (어디가 몇 박인지)
+    c.fillStyle = 'rgba(37,71,176,.35)';
+    for (let b = sys.b0; b < sys.b1; b++) for (let q = 0; q < spb; q++) {
+      const px = x + m.x0 + ((b - sys.b0) * spb + q + 0.5) * slotW;
+      c.beginPath(); c.arc(px, bottom + 5 * k, q % 4 === 0 ? 1.8 * k : 0.9 * k, 0, 7); c.fill();
+    }
+    if (cursor.slot >= sys.b0 * spb && cursor.slot < sys.b1 * spb) {
+      const cx = x + m.x0 + (cursor.slot - sys.b0 * spb) * slotW, cy = lineY(cursor.string);
+      const cw = Math.max(slotW, 16 * k), ox = (cw - slotW) / 2;
+      c.fillStyle = 'rgba(37,71,176,.16)'; c.strokeStyle = PEN; c.lineWidth = 1.6 * k;
+      c.beginPath(); c.rect(cx - ox, cy - m.gap / 2, cw, m.gap); c.fill(); c.stroke();
+      c.fillStyle = 'rgba(37,71,176,.07)'; c.fillRect(cx - ox, top - 12 * k, cw, bottom - top + 24 * k);
+    }
+  }
   // 재생 위치 선
   if (play != null && play >= sys.b0 * spb && play < sys.b1 * spb) {
     const px = x + m.x0 + (play - sys.b0 * spb + 0.5) * slotW;
     c.strokeStyle = PLAY; c.lineWidth = 2 * k; c.beginPath(); c.moveTo(px, top - 20 * k); c.lineTo(px, bottom + m.stem); c.stroke();
   }
   c.restore();
-  return { x0: x + m.x0, barW, b0: sys.b0, b1: sys.b1, top, gap: m.gap };
+  return { x0: x + m.x0, barW, slotW, b0: sys.b0, b1: sys.b1, top, gap: m.gap };
 }

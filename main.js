@@ -1,5 +1,5 @@
 // main.js — 베이스 연습 노트: 화면 전환, 메트로놈, 주법 연습, AI 악보, 라이브러리, PDF, 기록, 설정
-import { Engine, tapTempo } from './audio.js';
+import { Engine, tapTempo, toWav } from './audio.js';
 import { TabView } from './tabview.js';
 import { Store } from './store.js';
 import { PdfViewer, pdfInfo } from './pdfview.js';
@@ -138,7 +138,7 @@ async function saveBlob(name, blob) {
 
 // ------------------------------------------------------------------ 연습 기록
 let cur = null;   // 지금 하는 연습 {kind:'metro'|'tab', tab, startBpm, maxBpm}
-engine.on('bpm', d => { if (cur) cur.maxBpm = Math.max(cur.maxBpm || 0, d.bpm); if (cur && cur.kind === 'tab') { $('plBpm').value = d.bpm; $('plBpmOut').textContent = '♩ ' + d.bpm; } if (cur && cur.kind === 'metro') setMetroBpm(d.bpm, true); toast(`♩ ${d.bpm}로 빨라졌습니다`, 1500); });
+engine.on('bpm', d => { if (cur) cur.maxBpm = Math.max(cur.maxBpm || 0, d.bpm); if (cur && cur.kind === 'tab') showPlBpm(d.bpm); if (cur && cur.kind === 'metro') setMetroBpm(d.bpm, true); toast(`♩ ${d.bpm}로 빨라졌습니다`, 1500); });
 engine.on('stop', async d => {
   releaseWake();
   const c = cur; cur = null; syncPlayButtons();
@@ -249,6 +249,7 @@ const tv = new TabView($('plSystems'), { onBar: bar => setLoopBar(bar) });
 function openPlayer(tab, { from, saved } = {}) {
   if (engine.running) engine.stop();
   playFrom = from || view; P.tab = tab; P.saved = !!saved; P.loop = null; P.loopStart = null;
+  if (typeof setEdit === 'function') { setEdit(false); E.undo = []; E.redo = []; }
   $('plTitle').value = tab.title || '연습 악보';
   $('plTech').textContent = TECH[tab.technique] || '곡'; $('plTech').hidden = !tab.technique;
   $('plSource').textContent = { ai: 'Gemini가 만듦', rule: '자동 생성', transcribe: '채보', import: '가져옴' }[tab.source] || (tab.source ? tab.source : '');
@@ -257,18 +258,20 @@ function openPlayer(tab, { from, saved } = {}) {
   $('plDesc').textContent = tab.desc || ''; $('plDesc').hidden = !tab.desc;
   $('plTips').innerHTML = (tab.tips || []).map(t => `<li>${esc(t)}</li>`).join(''); $('plTips').hidden = !(tab.tips || []).length;
   $('plFixes').textContent = tab.fixes && tab.fixes.length ? '자동 정리: ' + tab.fixes.join(' · ') : ''; $('plFixes').hidden = !$('plFixes').textContent;
-  $('plBpm').value = tab.lastBpm || tab.bpm; $('plBpmOut').textContent = '♩ ' + (tab.lastBpm || tab.bpm);
+  showPlBpm(tab.lastBpm || tab.bpm);
+  $('plBpmReset').textContent = `원래 속도 ♩${tab.bpm}`;
   $('plSave').textContent = P.saved ? '저장됨' : '라이브러리에 저장'; $('plSave').disabled = P.saved;
   updLoop();
   show('play');
   tv.set(tab, T.openOf(tab.tuning));
 }
-$('plBack').addEventListener('click', () => { if (engine.running) engine.stop(); show(playFrom || 'practice'); });
+$('plBack').addEventListener('click', () => { if (engine.running) engine.stop(); setEdit(false); show(playFrom || 'practice'); });
 $('plTitle').addEventListener('change', async () => { if (!P.tab) return; P.tab.title = $('plTitle').value.trim() || P.tab.title; if (P.saved) await store.put('tabs', P.tab, { keepTime: true }); });
 $('plSave').addEventListener('click', async () => {
   if (!P.tab) return;
-  const v = await store.put('tabs', Object.assign({}, P.tab, { title: $('plTitle').value.trim() || P.tab.title }));
-  P.tab = v; P.saved = true; $('plSave').textContent = '저장됨'; $('plSave').disabled = true; toast('라이브러리에 저장했습니다');
+  P.tab.title = $('plTitle').value.trim() || P.tab.title;
+  const v = await store.put('tabs', P.tab);
+  Object.assign(P.tab, { id: v.id, createdAt: v.createdAt, updatedAt: v.updatedAt }); P.saved = true; $('plSave').textContent = '저장됨'; $('plSave').disabled = true; toast('라이브러리에 저장했습니다');
 });
 function setLoopBar(bar) {
   if (P.loopStart == null) { P.loopStart = bar; P.loop = [bar, bar + 1]; }
@@ -294,7 +297,31 @@ function startTab() {
   if (P.saved) { P.tab.lastBpm = bpm; store.put('tabs', P.tab, { keepTime: true }); }
 }
 $('plPlay').addEventListener('click', () => { if (engine.running && cur && cur.kind === 'tab') engine.stop(); else startTab(); });
-const setPlBpm = b => { b = Math.max(30, Math.min(260, Math.round(b))); $('plBpm').value = b; $('plBpmOut').textContent = '♩ ' + b; if (engine.running && cur && cur.kind === 'tab') engine.setBpm(b); };
+function showPlBpm(b) {
+  $('plBpm').value = b; $('plBpmNum').value = b; $('plBpmOut').textContent = '♩ ' + b;
+  $('plPct').textContent = P.tab ? Math.round(b / P.tab.bpm * 100) + '%' : '';
+}
+const setPlBpm = b => {
+  b = Math.max(30, Math.min(260, Math.round(b)));
+  showPlBpm(b);
+  if (engine.running && cur && cur.kind === 'tab') { engine.setBpm(b); cur.maxBpm = Math.max(cur.maxBpm || 0, b); }
+  if (P.tab && P.saved) { P.tab.lastBpm = b; clearTimeout(setPlBpm._t); setPlBpm._t = setTimeout(() => store.put('tabs', P.tab, { keepTime: true }), 800); }
+};
+$('plBpmNum').addEventListener('change', () => setPlBpm(+$('plBpmNum').value || (P.tab ? P.tab.bpm : 90)));
+$('plBpmReset').addEventListener('click', () => { if (P.tab) setPlBpm(P.tab.bpm); });
+const plTap = tapTempo();
+$('plTap').addEventListener('click', () => { engine.ensure(); const b = plTap(); if (b) setPlBpm(b); });
+$('plWav').addEventListener('click', async () => {
+  if (!P.tab) return;
+  if (engine.running) engine.stop();
+  const btn = $('plWav'); btn.disabled = true; btn.textContent = '만드는 중…';
+  try {
+    const bpm = +$('plBpm').value || P.tab.bpm;
+    const ab = await engine.renderOffline({ tab: P.tab, bpm, beats: P.tab.beats || 4, open: T.openOf(P.tab.tuning), swing: !!P.tab.swing, countIn: $('plCount').checked ? 1 : 0, clickOn: $('plClick').checked, bassOn: true, loop: P.loop });
+    saveBlob(`${($('plTitle').value || '연습').replace(/[\\/:*?"<>|]+/g, '_')}_${bpm}bpm.wav`, toWav(ab));
+  } catch (e) { console.error(e); toast('소리 파일을 만들지 못했습니다: ' + e.message); }
+  btn.disabled = false; btn.textContent = '소리 저장(WAV)';
+});
 $('plBpm').addEventListener('input', () => setPlBpm(+$('plBpm').value));
 $('plSlower').addEventListener('click', () => setPlBpm(+$('plBpm').value - 2));
 $('plFaster').addEventListener('click', () => setPlBpm(+$('plBpm').value + 2));
@@ -347,6 +374,226 @@ function makePdf(jpegs, pw, ph) {
   push(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
   const out = new Uint8Array(len); let o = 0; parts.forEach(p => { out.set(p, o); o += p.length; }); return out;
 }
+
+// ------------------------------------------------------------------ 악보 직접 편집
+// 커서(마디 안 16분음표 칸 × 줄)를 옮기며 프렛 번호를 넣는 방식. 한 칸에는 음 하나.
+const HARM_FRETS = [12, 7, 5, 4, 9, 19, 16, 24];
+const LENS = [[1, '16분'], [2, '8분'], [3, '점8분'], [4, '4분'], [6, '점4분'], [8, '2분'], [12, '점2분'], [16, '온음표']];
+const E = { on: false, slot: 0, string: 0, len: 2, undo: [], redo: [], buf: '', bufT: null, clip: null, saveT: null };
+const spbOf = () => 4 * ((P.tab && P.tab.beats) || 4);
+const openNow = () => T.openOf(P.tab.tuning);
+const noteAtSlot = s => P.tab.notes.find(n => n.slot === s) || null;
+function snapshot() { const t = P.tab; return JSON.stringify({ notes: t.notes, bars: t.bars, chords: t.chords || null, beats: t.beats, tuning: t.tuning, bpm: t.bpm, swing: !!t.swing }); }
+function pushEdit() { E.undo.push(snapshot()); if (E.undo.length > 100) E.undo.shift(); E.redo = []; }
+function restore(json) { const d = JSON.parse(json); Object.assign(P.tab, d); edChanged(true); }
+function fixMidi(n, open) {
+  if (n.dead) { n.midi = null; n.fret = null; return; }
+  n.midi = n.harm ? T.harmPitch(open, n.string, n.fret) : open[n.string] + n.fret;
+}
+/** 겹침 정리·정렬·마디 수 */
+function normalize() {
+  const t = P.tab, spb = spbOf();
+  t.notes.sort((a, b) => a.slot - b.slot);
+  for (let i = 0; i < t.notes.length; i++) { const n = t.notes[i], nx = t.notes[i + 1]; n.len = Math.max(1, n.len || 1); if (nx && n.slot + n.len > nx.slot) n.len = Math.max(1, nx.slot - n.slot); }
+  const last = t.notes.reduce((m, n) => Math.max(m, n.slot + n.len), 0);
+  t.bars = Math.max(1, t.bars || 1, Math.ceil(last / spb));
+}
+function edChanged(structural) {
+  normalize();
+  if (structural) tv.set(P.tab, openNow()); else tv.render();
+  tv.setCursor(E.on ? { slot: E.slot, string: E.string } : null);
+  if (engine.running && cur && cur.kind === 'tab') engine.refreshTab();
+  updMeta(); edUI();
+  // 저장: 라이브러리에 있는 악보는 자동 저장, 아니면 저장 버튼 켬
+  if (P.saved) { clearTimeout(E.saveT); E.saveT = setTimeout(() => store.put('tabs', P.tab, { keepTime: false }).then(v => { P.tab.updatedAt = v.updatedAt; }), 900); $('plSave').textContent = '자동 저장됨'; }
+  else { $('plSave').disabled = false; $('plSave').textContent = '라이브러리에 저장'; }
+}
+function updMeta() {
+  const tab = P.tab;
+  $('plMeta').textContent = `${(T.TUNINGS[tab.tuning] || T.TUNINGS['4std']).label.replace(/ ·.*/, '')} · ♩= ${tab.bpm} · ${tab.beats || 4}/4${tab.swing ? ' · 스윙' : ''}${tab.key ? ' · ' + tab.key : ''}${tab.bestBpm ? ' · 최고 ♩' + tab.bestBpm : ''}`;
+}
+function moveCursor(slot, string) {
+  const spb = spbOf(), maxSlot = (P.tab.bars + 1) * spb - 1, nStr = openNow().length;
+  E.slot = Math.max(0, Math.min(maxSlot, slot)); E.string = Math.max(0, Math.min(nStr - 1, string));
+  if (E.slot >= P.tab.bars * spb) { P.tab.bars = Math.floor(E.slot / spb) + 1; tv.set(P.tab, openNow()); }
+  const n = noteAtSlot(E.slot); if (n && n.string != null && n.string !== E.string && !n.dead) { /* 다른 줄의 음이 있으면 그 줄로 */ E.string = n.string; }
+  if (n) E.len = n.len;
+  tv.setCursor({ slot: E.slot, string: E.string }); edUI();
+}
+function edUI() {
+  if (!E.on || !P.tab) return;
+  const spb = spbOf(), bar = Math.floor(E.slot / spb), pos = E.slot % spb, beat = Math.floor(pos / 4) + 1, sub = pos % 4;
+  const open = openNow(), n = noteAtSlot(E.slot);
+  const nm = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'][open[E.string] % 12];
+  $('edPos').textContent = `${bar + 1}마디 ${beat}박${sub ? ' +' + ['', 'e', '&', 'a'][sub] : ''} · ${nm}줄${n ? (n.dead ? ' · x' : ' · ' + n.fret + '프렛') : ' · 쉼'}`;
+  $('edLen').querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(+c.dataset.l === E.len)));
+  $('edTech').querySelectorAll('.chip').forEach(c => { c.disabled = !n || n.dead; c.setAttribute('aria-pressed', String(!!n && String(n.tech || '') === c.dataset.v)); });
+  $('edFx').querySelectorAll('.chip').forEach(c => { const k = c.dataset.k; c.disabled = !n || (n.dead && k !== 'dead' && k !== 'slap' && k !== 'pop'); c.setAttribute('aria-pressed', String(!!n && (k === 'bend' ? (n.bend || 0) === +c.dataset.v && n.bend > 0 : !!n[k]))); });
+  $('edUndo').disabled = !E.undo.length; $('edRedo').disabled = !E.redo.length;
+  $('edChordLbl').textContent = `${bar + 1}마디 코드`; $('edChord').value = (P.tab.chords && P.tab.chords[bar]) || '';
+  $('edBeats').value = String(P.tab.beats || 4); $('edTuning').value = P.tab.tuning || '4std'; $('edBpm').value = P.tab.bpm; $('edSwing').checked = !!P.tab.swing;
+}
+function audition(n) {
+  if (!$('edSound').checked || !n || (engine.running && cur && cur.kind === 'tab')) return;
+  const ctx = engine.ensure();
+  const dur = Math.min(1.2, (n.len || 1) * 60 / (P.tab.bpm || 90) / 4);
+  engine.voices = []; engine.playNote(Object.assign({}, n, { tech: null }), openNow(), ctx.currentTime + 0.02, Math.max(0.15, dur));
+}
+/** 커서 칸에 프렛 넣기 (이미 음이 있으면 바꿈) */
+function putFret(fret, dead, noPush) {
+  const open = openNow(), max = 24;
+  if (!dead && (fret < 0 || fret > max)) return toast(`프렛은 0~${max}입니다`);
+  if (!noPush) pushEdit();
+  let n = noteAtSlot(E.slot);
+  if (!n) {
+    // 앞 음이 이 칸까지 이어지면 잘라 줌
+    const prev = P.tab.notes.filter(x => x.slot < E.slot).pop(); if (prev && prev.slot + prev.len > E.slot) prev.len = E.slot - prev.slot;
+    n = { slot: E.slot, len: E.len, string: E.string, fret: 0 }; P.tab.notes.push(n);
+  }
+  n.string = E.string;
+  if (dead) { n.dead = true; n.ghost = true; n.fret = null; n.harm = false; }
+  else { n.dead = false; if (n.ghost && n.fret == null) n.ghost = false; n.fret = fret; if (n.harm && !HARM_FRETS.includes(fret)) { n.harm = false; toast(`${fret}프렛은 자연 하모닉 위치가 아니라 하모닉 표시를 뺐습니다`); } }
+  fixMidi(n, open);
+  edChanged(false); audition(n);
+}
+function delAtCursor() {
+  const n = noteAtSlot(E.slot); if (!n) return moveCursor(E.slot - E.len, E.string);
+  pushEdit(); P.tab.notes.splice(P.tab.notes.indexOf(n), 1); edChanged(false);
+}
+function clearBuf() { clearTimeout(E.bufT); E.buf = ''; }
+function typeDigit(d) {
+  clearTimeout(E.bufT);
+  if (E.buf && E.bufSlot === E.slot) {
+    // 두 번째 자리 (10~24)
+    const v = +(E.buf + d); E.buf = '';
+    if (v <= 24) putFret(v, false, true); else toast('프렛은 24까지입니다');
+    moveCursor(E.slot + E.len, E.string); return;
+  }
+  E.buf = '';
+  putFret(+d);
+  if (d === '1' || d === '2') { E.buf = d; E.bufSlot = E.slot; E.bufT = setTimeout(() => { E.buf = ''; moveCursor(E.slot + E.len, E.string); }, 700); }
+  else moveCursor(E.slot + E.len, E.string);
+}
+function setLen(l) {
+  E.len = l;
+  const n = noteAtSlot(E.slot);
+  if (n) { pushEdit(); const nx = P.tab.notes.find(x => x.slot > n.slot); n.len = l; if (nx && n.slot + l > nx.slot) { n.len = nx.slot - n.slot; toast('다음 음이 있어서 그 앞까지만 늘였습니다. 길게 하려면 다음 음을 먼저 지우세요', 3500); } edChanged(false); }
+  else edUI();
+}
+function setTech(v) {
+  const n = noteAtSlot(E.slot); if (!n || n.dead) return;
+  pushEdit();
+  if (v) {
+    const prev = P.tab.notes.filter(x => x.slot < n.slot && !x.dead).pop();
+    if (!prev || prev.string !== n.string) { if (v !== 't') toast('해머링·풀링·슬라이드는 앞 음과 같은 줄이어야 소리가 이어집니다'); }
+  }
+  n.tech = v || null; edChanged(false);
+}
+function toggleFx(k, val) {
+  const n = noteAtSlot(E.slot); if (!n) return;
+  pushEdit();
+  const open = openNow();
+  if (k === 'bend') { n.bend = (n.bend === +val) ? 0 : +val; if (!n.bend) n.release = false; }
+  else if (k === 'release') { n.release = !n.release; if (n.release && !n.bend) n.bend = 2; }
+  else if (k === 'slideIn') n.slideIn = n.slideIn ? null : 'up';
+  else if (k === 'slideOut') n.slideOut = n.slideOut ? null : 'down';
+  else if (k === 'dead') { if (n.dead) { n.dead = false; n.ghost = false; n.fret = 0; } else { n.dead = true; n.ghost = true; n.fret = null; n.harm = false; n.tech = null; } }
+  else if (k === 'harm') { if (!n.harm && !HARM_FRETS.includes(n.fret)) { E.undo.pop(); return toast('자연 하모닉은 12·7·5·4·9·19프렛 등에서만 납니다'); } n.harm = !n.harm; }
+  else if (k === 'slap') { n.slap = !n.slap; if (n.slap) n.pop = false; }
+  else if (k === 'pop') { n.pop = !n.pop; if (n.pop) n.slap = false; }
+  else n[k] = !n[k];
+  fixMidi(n, open);
+  edChanged(false); audition(n);
+}
+function barOp(op) {
+  const spb = spbOf(), bar = Math.floor(E.slot / spb), a = bar * spb, b = a + spb, t = P.tab;
+  if (op === 'paste' && !E.clip) return toast('먼저 마디를 복사하세요');
+  if (op === 'del' && t.bars <= 1) return toast('마디가 하나뿐입니다');
+  pushEdit();
+  t.chords = t.chords || [];
+  if (op === 'add') { t.notes.forEach(n => { if (n.slot >= b) n.slot += spb; }); t.chords.splice(bar + 1, 0, ''); t.bars++; E.slot = b; }
+  else if (op === 'del') { t.notes = t.notes.filter(n => n.slot < a || n.slot >= b); t.notes.forEach(n => { if (n.slot >= b) n.slot -= spb; }); t.chords.splice(bar, 1); t.bars--; E.slot = Math.min(E.slot, t.bars * spb - 1); }
+  else if (op === 'clear') { t.notes = t.notes.filter(n => n.slot < a || n.slot >= b); }
+  else if (op === 'copy') { E.undo.pop(); E.clip = { notes: t.notes.filter(n => n.slot >= a && n.slot < b).map(n => Object.assign({}, n, { slot: n.slot - a })), chord: t.chords[bar] || '' }; return toast(`${bar + 1}마디를 복사했습니다`); }
+  else if (op === 'paste') { t.notes = t.notes.filter(n => n.slot < a || n.slot >= b).concat(E.clip.notes.map(n => Object.assign({}, n, { slot: n.slot + a }))); if (E.clip.chord) t.chords[bar] = E.clip.chord; }
+  if (t.chords.every(c => !c)) t.chords = null;
+  edChanged(true);
+}
+function setEdit(on) {
+  E.on = on && !!P.tab;
+  document.body.classList.toggle('editing', E.on);
+  $('plEditor').hidden = !E.on; $('plEdit').setAttribute('aria-pressed', String(E.on)); $('plEdit').textContent = E.on ? '✎ 편집 중' : '✎ 편집';
+  if (E.on) { const first = P.tab.notes[0]; E.slot = first ? first.slot : 0; E.string = first && first.string != null ? first.string : 0; if (first) E.len = first.len; tv.setCursor({ slot: E.slot, string: E.string }); edUI(); }
+  else { tv.setCursor(null); E.buf = ''; }
+}
+// 버튼 만들기
+$('edLen').innerHTML = LENS.map(([l, t]) => `<button type="button" class="chip sm" data-l="${l}">${t}</button>`).join('');
+$('edLen').querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => setLen(+c.dataset.l)));
+$('edKeys').innerHTML = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map(d => `<button type="button" data-d="${d}">${d}</button>`).join('') + '<button type="button" data-a="x" aria-label="데드 노트">x</button><button type="button" data-a="del" aria-label="음 지우기">⌫</button>';
+$('edKeys').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { if (b.dataset.d) typeDigit(b.dataset.d); else if (b.dataset.a === 'x') { putFret(0, true); moveCursor(E.slot + E.len, E.string); } else delAtCursor(); }));
+$('edTech').innerHTML = [['', '피킹'], ['h', 'H 해머링'], ['p', 'P 풀링'], ['s', '/ 슬라이드'], ['t', 'T 태핑']].map(([v, l]) => `<button type="button" class="chip sm" data-v="${v}">${l}</button>`).join('');
+$('edTech').querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => setTech(c.dataset.v)));
+$('edFx').innerHTML = [['slap', '', 'S 슬랩'], ['pop', '', 'Po 팝'], ['dead', '', 'x 데드'], ['ghost', '', '( ) 고스트'], ['harm', '', '< > 하모닉'], ['vib', '', '~ 비브라토'], ['bend', '1', '↑ ½'], ['bend', '2', '↑ full'], ['release', '', '릴리스'], ['slideIn', '', '/ 슬라이드 인'], ['slideOut', '', '\\ 슬라이드 아웃']]
+  .map(([k, v, l]) => `<button type="button" class="chip sm" data-k="${k}" data-v="${v}">${esc(l)}</button>`).join('');
+$('edFx').querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => toggleFx(c.dataset.k, c.dataset.v)));
+$('edLeft').addEventListener('click', () => clearBuf() || moveCursor(E.slot - E.len, E.string));
+$('edRight').addEventListener('click', () => clearBuf() || moveCursor(E.slot + E.len, E.string));
+$('edUp').addEventListener('click', () => clearBuf() || moveCursor(E.slot, E.string + 1));
+$('edDown').addEventListener('click', () => clearBuf() || moveCursor(E.slot, E.string - 1));
+$('edUndo').addEventListener('click', () => { if (!E.undo.length) return; E.redo.push(snapshot()); restore(E.undo.pop()); });
+$('edRedo').addEventListener('click', () => { if (!E.redo.length) return; E.undo.push(snapshot()); restore(E.redo.pop()); });
+$('edHear').addEventListener('click', () => { const n = noteAtSlot(E.slot); if (n) { const s = $('edSound').checked; $('edSound').checked = true; audition(n); $('edSound').checked = s; } });
+$('edPlay').addEventListener('click', () => { if (engine.running && cur && cur.kind === 'tab') engine.stop(); else startTab(); $('edPlay').textContent = engine.running ? '■ 멈추기' : '▶ 재생'; });
+engine.on('stop', () => { $('edPlay').textContent = '▶ 재생'; });
+$('edDone').addEventListener('click', () => setEdit(false));
+$('plEdit').addEventListener('click', () => setEdit(!E.on));
+$('edChord').addEventListener('change', () => { const bar = Math.floor(E.slot / spbOf()); pushEdit(); P.tab.chords = P.tab.chords || []; while (P.tab.chords.length < P.tab.bars) P.tab.chords.push(''); P.tab.chords[bar] = $('edChord').value.trim(); if (P.tab.chords.every(c => !c)) P.tab.chords = null; edChanged(true); });
+$('edBarAdd').addEventListener('click', () => barOp('add'));
+$('edBarDel').addEventListener('click', () => barOp('del'));
+$('edBarClear').addEventListener('click', () => barOp('clear'));
+$('edBarCopy').addEventListener('click', () => barOp('copy'));
+$('edBarPaste').addEventListener('click', () => barOp('paste'));
+Object.entries(T.TUNINGS).forEach(([id, t]) => $('edTuning').add(new Option(t.label, id)));
+$('edBeats').addEventListener('change', () => { pushEdit(); P.tab.beats = +$('edBeats').value; edChanged(true); toast('박자를 바꿨습니다. 음 위치는 그대로라 마디 나눔이 달라질 수 있습니다', 4000); });
+$('edTuning').addEventListener('change', () => {
+  const nt = $('edTuning').value, open = T.openOf(nt), oldOpen = openNow();
+  pushEdit();
+  // 같은 음높이를 새 튜닝에서 칠 수 있게 줄·프렛 다시 배치
+  P.tab.notes.forEach(n => { if (n.dead) { n.string = Math.min(n.string ?? 0, open.length - 1); return; } if (n.harm) { n.string = Math.min(n.string, open.length - 1); return; } n.midi = n.midi ?? oldOpen[n.string] + n.fret; n.string = null; });
+  P.tab.tuning = nt;
+  T.placeFrets(P.tab.notes, nt, null, null, 24);
+  P.tab.notes.forEach(n => fixMidi(n, open));
+  E.string = Math.min(E.string, open.length - 1);
+  edChanged(true);
+});
+$('edBpm').addEventListener('change', () => { const b = Math.max(30, Math.min(260, +$('edBpm').value || 90)); pushEdit(); P.tab.bpm = b; $('plBpmReset').textContent = `원래 속도 ♩${b}`; setPlBpm(b); edChanged(false); });
+$('edSwing').addEventListener('change', () => { pushEdit(); P.tab.swing = $('edSwing').checked; edChanged(false); });
+tv.safeBottom = () => (E.on ? $('plEditor').getBoundingClientRect().height + 24 : 120);
+// 악보를 탭: 편집 중이면 그 칸으로 커서
+tv.onCell = ({ slot, string }) => { E.buf = ''; clearTimeout(E.bufT); moveCursor(slot, string); E.string = string; const n = noteAtSlot(slot); if (n && n.string != null) E.string = n.string; tv.setCursor({ slot: E.slot, string: E.string }); edUI(); };
+// 키보드 (iPad 매직 키보드 등)
+document.addEventListener('keydown', e => {
+  if (!E.on || view !== 'play' || /INPUT|SELECT|TEXTAREA/.test((e.target || {}).tagName || '')) return;
+  const k = e.key;
+  if (/^[0-9]$/.test(k)) { e.preventDefault(); typeDigit(k); }
+  else if (k === 'ArrowRight') { e.preventDefault(); clearBuf(); moveCursor(E.slot + (e.shiftKey ? 1 : E.len), E.string); }
+  else if (k === 'ArrowLeft') { e.preventDefault(); clearBuf(); moveCursor(E.slot - (e.shiftKey ? 1 : E.len), E.string); }
+  else if (k === 'ArrowUp') { e.preventDefault(); moveCursor(E.slot, E.string + 1); }
+  else if (k === 'ArrowDown') { e.preventDefault(); moveCursor(E.slot, E.string - 1); }
+  else if (k === 'Backspace' || k === 'Delete') { e.preventDefault(); delAtCursor(); }
+  else if (k === 'x' || k === 'X') { putFret(0, true); moveCursor(E.slot + E.len, E.string); }
+  else if (k === 'h' || k === 'p' || k === 's') setTech((noteAtSlot(E.slot) || {}).tech === k ? '' : k);
+  else if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('edRedo') : $('edUndo')).click(); }
+}, true);
+// 새 악보
+function newTab() {
+  const tab = { title: '새 악보', technique: 'song', source: 'user', tuning: tuningId(), bpm: 90, beats: 4, bars: 4, notes: [], createdAt: Date.now() };
+  openPlayer(tab, { from: view === 'play' ? 'lib' : view });
+  setEdit(true);
+  toast('커서를 옮기며 숫자(프렛)를 누르세요. 악보를 탭하면 그 칸으로 갑니다', 4500);
+}
+$('libNew').addEventListener('click', newTab);
+$('prBlank').addEventListener('click', newTab);
 
 // ------------------------------------------------------------------ 주법 연습 (규칙 기반 악보)
 const keyOpts = T.KEYS.filter(([k]) => !['Db', 'Gb'].includes(k) || true).map(([k]) => [k, k]);

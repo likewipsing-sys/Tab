@@ -214,9 +214,26 @@ input[type=range].full { width: 100%; accent-color: var(--accent); height: 30px;
 .ctrlbar { position: sticky; bottom: 0; z-index: 15; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; box-shadow: var(--shadow); margin-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
 .ctrlbar .grow { flex: 1 1 180px; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ctrlbar .grow input { flex: 1; min-width: 0; accent-color: var(--accent); }
-.ctrlbar .mono { min-width: 5.5em; }
+.ctrlbar .mono { min-width: 3.5em; }
+.bpmgrp { display: inline-flex; align-items: center; gap: 6px; }
+.bpmbox { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); }
+.bpmbox input { width: 4.2em; min-height: 38px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); padding: 0 6px; font-family: var(--font-mono); font-size: 1rem; }
+.pct { color: var(--muted); font-size: .82rem; }
 .toggle.btnlike { border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; background: var(--chip); min-height: 38px; }
 .count { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 35; font-family: var(--font-mono); font-size: 9rem; color: var(--accent); opacity: .85; }
+.editpanel { position: sticky; bottom: max(8px, env(safe-area-inset-bottom, 0px)); z-index: 16; box-shadow: var(--shadow); gap: 8px; max-height: min(44vh, 440px); overflow-y: auto; overscroll-behavior: contain; }
+#v-play .paper { scroll-margin-bottom: 46vh; }
+.edrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.edrow .sp { flex: 1; }
+.edpos { font-family: var(--font-mono); font-size: .85rem; min-width: 11em; color: var(--accent); font-weight: 600; }
+.edlbl { font-size: .78rem; color: var(--muted); min-width: 6.5em; }
+.keypad { display: grid; grid-template-columns: repeat(6, 44px); gap: 6px; }
+.keypad button { min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--chip); font-family: var(--font-mono); font-size: 1.05rem; }
+.keypad button.wide { grid-column: span 2; font-family: var(--font-body); font-size: .85rem; }
+.arrows { display: grid; grid-template-columns: repeat(2, 50px); gap: 6px; }
+.arrows .btn { min-height: 44px; }
+body.editing .ctrlbar { display: none; }
+@media (max-width: 620px) { .editpanel { max-height: 48vh; } .keypad { grid-template-columns: repeat(6, 1fr); width: 100%; } .arrows { grid-template-columns: repeat(4, 1fr); width: 100%; } .edlbl { min-width: 0; width: 100%; } }
 .tips { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
 .playhead-info { font-size: .85rem; color: var(--muted); }
 
@@ -349,7 +366,7 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
     <h2><span>무엇을 연습할까요</span></h2>
     <div class="chips wrap" id="prTech"></div>
     <div class="grid3" id="prOpts"></div>
-    <div class="row"><button class="btn primary" type="button" id="prMake">연습 악보 만들기</button><button class="btn" type="button" id="prAgain" hidden>다른 패턴으로</button></div>
+    <div class="row"><button class="btn primary" type="button" id="prMake">연습 악보 만들기</button><button class="btn" type="button" id="prBlank">빈 악보에 직접 쓰기</button><button class="btn" type="button" id="prAgain" hidden>다른 패턴으로</button></div>
     <p class="hint" id="prHint"></p>
   </div>
 </section>
@@ -384,7 +401,7 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
     <button type="button" id="libPdfBtn" aria-pressed="false">PDF 악보</button>
   </div>
   <div class="card" id="libTabsCard">
-    <h2><span>내 악보</span></h2>
+    <h2><span>내 악보</span><button class="btn small" type="button" id="libNew">+ 새 악보 쓰기</button></h2>
     <div class="chips wrap" id="libFilter"></div>
     <div class="list" id="libTabs"></div>
   </div>
@@ -403,13 +420,61 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
     <span class="badge tech" id="plTech"></span>
     <span class="badge" id="plSource"></span>
     <span class="sp"></span>
+    <button class="btn small" type="button" id="plEdit" aria-pressed="false">✎ 편집</button>
     <button class="btn small" type="button" id="plSave">라이브러리에 저장</button>
     <button class="btn small" type="button" id="plPdf">PDF로 저장</button>
+    <button class="btn small" type="button" id="plWav">소리 저장(WAV)</button>
   </div>
   <div class="paper">
     <div class="paper-head"><input id="plTitle" aria-label="악보 제목"><div class="meta" id="plMeta"></div></div>
     <div class="legend"><span>H 해머링</span><span>P 풀링</span><span>/ \ 슬라이드</span><span>S 슬랩(엄지)</span><span>Po 팝</span><span>x 고스트</span><span>&lt; &gt; 하모닉</span><span>~ 비브라토</span></div>
     <div class="systems" id="plSystems"></div>
+  </div>
+  <div class="card editpanel" id="plEditor" hidden>
+    <div class="edrow">
+      <span class="edpos" id="edPos">1마디 1박</span>
+      <div class="chips" id="edLen" role="group" aria-label="음 길이"></div>
+    </div>
+    <div class="edrow">
+      <div class="keypad" id="edKeys" role="group" aria-label="프렛 번호"></div>
+      <div class="arrows" role="group" aria-label="커서 이동">
+        <button type="button" class="btn small" id="edLeft" aria-label="앞 칸">◀</button>
+        <button type="button" class="btn small" id="edUp" aria-label="위 줄">▲</button>
+        <button type="button" class="btn small" id="edDown" aria-label="아래 줄">▼</button>
+        <button type="button" class="btn small" id="edRight" aria-label="다음 칸">▶</button>
+      </div>
+    </div>
+    <div class="edrow"><span class="edlbl">앞 음과 연결</span><div class="chips" id="edTech" role="group" aria-label="연결 주법"></div></div>
+    <div class="edrow"><span class="edlbl">표현</span><div class="chips" id="edFx" role="group" aria-label="표현"></div></div>
+    <div class="edrow">
+      <button type="button" class="btn small primary" id="edPlay">▶ 재생</button>
+      <button type="button" class="btn small" id="edHear">이 음 듣기</button>
+      <button type="button" class="btn small" id="edUndo">되돌리기</button>
+      <button type="button" class="btn small" id="edRedo">다시 하기</button>
+      <label class="toggle"><input type="checkbox" id="edSound" checked> 입력할 때 소리</label>
+      <span class="sp"></span>
+      <button type="button" class="btn small" id="edDone">편집 끝</button>
+    </div>
+    <details class="adv" id="edMore">
+      <summary>마디 · 악보 설정</summary>
+      <div>
+        <div class="row">
+          <div class="field"><label for="edChord" id="edChordLbl">이 마디 코드</label><input type="text" id="edChord" placeholder="예: Em7" style="max-width:8em"></div>
+          <button type="button" class="btn small" id="edBarAdd">뒤에 마디 추가</button>
+          <button type="button" class="btn small" id="edBarCopy">마디 복사</button>
+          <button type="button" class="btn small" id="edBarPaste">붙여넣기</button>
+          <button type="button" class="btn small" id="edBarClear">마디 비우기</button>
+          <button type="button" class="btn small" id="edBarDel">마디 지우기</button>
+        </div>
+        <div class="row">
+          <div class="field"><label for="edBeats">박자</label><select id="edBeats"><option value="2">2/4</option><option value="3">3/4</option><option value="4">4/4</option><option value="5">5/4</option><option value="6">6/4</option><option value="7">7/4</option></select></div>
+          <div class="field"><label for="edTuning">베이스</label><select id="edTuning"></select></div>
+          <div class="field"><label for="edBpm">악보 BPM</label><input type="number" id="edBpm" min="30" max="260"></div>
+          <label class="toggle"><input type="checkbox" id="edSwing"> 스윙</label>
+        </div>
+        <p class="hint">키보드: 숫자 = 프렛, ←→ = 칸 이동, ↑↓ = 줄, Delete = 지우기, x = 데드, h·p·s = 해머링·풀링·슬라이드</p>
+      </div>
+    </details>
   </div>
   <div class="card" id="plInfo">
     <p class="hint" id="plDesc"></p>
@@ -419,7 +484,10 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
   </div>
   <div class="ctrlbar">
     <button class="btn primary" type="button" id="plPlay">▶ 연습 시작</button>
-    <div class="grow"><button class="btn small" type="button" id="plSlower" aria-label="느리게">−</button><input type="range" id="plBpm" min="30" max="260" aria-label="BPM"><button class="btn small" type="button" id="plFaster" aria-label="빠르게">+</button><span class="mono" id="plBpmOut">♩ 90</span></div>
+    <div class="bpmgrp"><button class="btn small" type="button" id="plSlower" aria-label="느리게">−</button><label class="bpmbox">♩<input type="number" id="plBpmNum" min="30" max="260" inputmode="numeric" aria-label="BPM 직접 입력"></label><button class="btn small" type="button" id="plFaster" aria-label="빠르게">+</button><span class="mono pct" id="plPct">100%</span><span id="plBpmOut" hidden></span></div>
+    <div class="grow"><input type="range" id="plBpm" min="30" max="260" aria-label="BPM 슬라이더"></div>
+    <button class="btn small" type="button" id="plBpmReset" title="악보에 적힌 BPM으로">원래 속도</button>
+    <button class="btn small" type="button" id="plTap">탭 템포</button>
     <button class="btn small" type="button" id="plMoreBtn" aria-expanded="false">옵션</button>
     <div class="ctrlmore" id="plMore">
     <label class="toggle btnlike"><input type="checkbox" id="plCount" checked> 예비박</label>
@@ -651,6 +719,7 @@ textarea { font: inherit; color: inherit; border: 1px solid var(--line); border-
 <script src="track.js"></script>
 <script src="theory.js"></script>
 <script src="ai.js"></script>
+<script src="synth.js"></script>
 <script type="module" src="app.js"></script>
 <script type="module" src="main.js"></script>
 </body>
